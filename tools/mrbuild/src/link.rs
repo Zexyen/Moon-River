@@ -392,7 +392,7 @@ pub fn build_runtime(
     let mut a = strs(&["-c", "-O1", "-w"]);
     a.extend(t.cpu());
     a.extend(if t.windows() {
-        strs(&["-DWT_GAME_NOSTDLIB"])
+        strs(&["-DMR_GAME_NOSTDLIB"])
     } else {
         strs(&["-fPIC", "-D__declspec(x)="])
     });
