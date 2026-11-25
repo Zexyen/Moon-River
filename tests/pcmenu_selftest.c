@@ -1,7 +1,7 @@
 /* Self-test of the PC settings menu without the game: graphics.ini rewritten in place (gfx_option_set, gfx_ini_get) and the
  * panel drawn at two window sizes (pcmenu.c), the pictures written as BMP into the folder given (for a look).
  *   clang -D_GNU_SOURCE -D'__declspec(x)=' -Iruntime/posix -Iruntime -Iruntime/gen tests/pcmenu_selftest.c runtime/gfx_options.c \
- *         runtime/plat_posix.c -lm -o /tmp/pcmenu_selftest && /tmp/pcmenu_selftest /tmp/pcmenu_test */
+ *         runtime/plat_posix.c -lSDL3 -lm -o /tmp/pcmenu_selftest && /tmp/pcmenu_selftest /tmp/pcmenu_test */
 #include "../runtime/pcmenu.c"
 #include <assert.h>
 #include <sys/stat.h>
@@ -14,6 +14,7 @@ int nvn_front_post_pcmenu(void) { return 1; }
 int nvn_vk_hdr_on(void) { return 0; }
 void display_vsync_apply(void) { g_vsync_applied++; }
 int display_window_apply(void) { g_win_applied++; return 1; }
+void display_quit(void) {}
 void display_mouse_want(int on) { (void)on; }
 int nnpad_mouse_cfg(float *s, int *i) { (void)s; (void)i; return 0; }
 static const char *g_prompts = "playstation";
@@ -69,7 +70,7 @@ int main(int argc, char **argv) {
     /* a value not in a row's list (v0.5.2's 1.4, a hand-edited 16:10): the nearest one that way; none: left / right stay */
     int rs = row_of("resolution_scale"), ws = row_of("size");
     snprintf(g_raw[rs], sizeof g_raw[rs], "1.4");
-    assert(!strcmp(k_rows[rs].val[nearest(rs, 1, 0)], "1.6") && !strcmp(k_rows[rs].val[nearest(rs, -1, 0)], "1.2"));
+    assert(!strcmp(k_rows[rs].val[nearest(rs, 1, 0)], "1.5") && !strcmp(k_rows[rs].val[nearest(rs, -1, 0)], "1.25"));
     snprintf(g_raw[rs], sizeof g_raw[rs], "9");
     assert(nearest(rs, 1, 0) == -1 && nearest(rs, 1, 1) == 0 && !strcmp(k_rows[rs].val[nearest(rs, -1, 0)], "3.0"));
     snprintf(g_raw[ws], sizeof g_raw[ws], "1280x800");
@@ -92,10 +93,10 @@ int main(int argc, char **argv) {
     assert(strstr(s, "resolution_scale = 1.0\r\naspect = stretch\r\n") && strstr(s, "mystery = 7\r\n"));
     free(s);
     assert(gfx_option_set("resolution_scale", "2.4") && gfx_options()->scale == 2.4f);
-    spit(ini, "window = windowed\nwidth = 1280\nheight = 720\nvsync = auto\nresolution_scale = 1.6\nanisotropic_filtering = 8\n");      /* LF file */
+    spit(ini, "window = windowed\nwidth = 1280\nheight = 720\nvsync = auto\nresolution_scale = 1.5\nanisotropic_filtering = 8\n");      /* LF file */
     assert(gfx_option_set("width", "1920") && gfx_option_set("height", "1080") && gfx_options()->width == 1920 && gfx_options()->height == 1080);
     s = slurp(ini);
-    assert(!strcmp(s, "window = windowed\nwidth = 1920\nheight = 1080\nvsync = auto\nresolution_scale = 1.6\nanisotropic_filtering = 8\n"));
+    assert(!strcmp(s, "window = windowed\nwidth = 1920\nheight = 1080\nvsync = auto\nresolution_scale = 1.5\nanisotropic_filtering = 8\n"));
     free(s);
     /* opening from the pad: Start + Select together, not one of them and not the sticks */
     assert(pcmenu_gate(0, 0x30) == 0 && pcmenu_gate(0, 0) == 0 && pcmenu_gate(0, 1u << 10) == 0 && pcmenu_gate(0, 1u << 11) == 0 && !g_open);
@@ -104,12 +105,18 @@ int main(int argc, char **argv) {
     /* the menu's rows from that file; changes through the menu */
     menu_open("test");                              /* (its thread runs on with the stubs' idle input) */
     int vsr = row_of("vsync");
-    assert(!strcmp(k_rows[rs].val[g_cur[rs]], "1.6"));
+    assert(!strcmp(k_rows[rs].val[g_cur[rs]], "1.5"));
     assert(gfx_options()->aniso == 16 && gfx_options()->texture_lod_bias == -1.0f);      /* fixed: the file's anisotropic_filtering = 8 is not used */
     change(vsr, 1, 0); assert(gfx_options()->present == 4 && g_vsync_applied == 1 && (g_work & 2));      /* auto -> display */
-    pcmenu_take_work(); change(rs, 1, 0); assert(row_restart(rs) && !(g_work & 4));      /* 1.6 -> 2.0: applies when the panel closes */
-    change(rs, 1, 0); change(rs, 1, 0); change(rs, 1, 0); assert(g_cur[rs] == 10);      /* 3.0, the last: right stops there */
+    pcmenu_take_work(); change(rs, 1, 0); assert(row_restart(rs) && !(g_work & 4));      /* 1.5 -> 2.0: applies when the panel closes */
+    change(rs, 1, 0); change(rs, 1, 0); assert(g_cur[rs] == 7);              /* 3.0, the last: right stops there */
     change(rs, 1, 1); assert(g_cur[rs] == 0);              /* A goes round */
+    /* aspect: keep <-> stretch is live, switching to wide applies at the next start */
+    int asr = row_of("aspect");
+    assert(asr >= 0 && !row_restart(asr));
+    change(asr, 1, 0); assert(!strcmp(k_rows[asr].val[g_cur[asr]], "stretch") && gfx_options()->aspect_stretch == 1 && !row_restart(asr));
+    change(asr, 1, 0); assert(!strcmp(k_rows[asr].val[g_cur[asr]], "wide") && gfx_options()->aspect_stretch == 0 && row_restart(asr));
+    change(asr, -1, 0); change(asr, -1, 0); assert(!strcmp(k_rows[asr].val[g_cur[asr]], "keep") && !row_restart(asr));
     g_sel = rs; g_ver++;
     panel(dir, "pcmenu_1280x720", 1280, 720);
     panel(dir, "pcmenu_3840x2160", 3840, 2160);

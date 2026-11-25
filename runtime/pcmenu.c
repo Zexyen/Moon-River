@@ -538,6 +538,7 @@ static const char *val_name(int i) {
 }
 static int row_restart(int i) {                            /* a value that is not the running one yet */
     if (g_cur[i] == g_start[i]) return 0;
+    if (!strcmp(k_rows[i].key, "aspect")) return (g_cur[i] >= 0 && !strcmp(k_rows[i].val[g_cur[i]], "wide")) || (g_start[i] >= 0 && !strcmp(k_rows[i].val[g_start[i]], "wide"));
     return k_rows[i].apply == A_RESTART || (k_rows[i].apply == A_SCALE && g_open) || ((k_rows[i].apply == A_WINDOW || k_rows[i].apply == A_SIZE) && g_nowin);
 }
 /* a button hint on the pale band: the button that acts as Pro button b (0 = A, 1 = B) on player 1's pad, drawn as the

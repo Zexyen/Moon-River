@@ -83,10 +83,14 @@ fn main() {
         Some("lift") if args.len() >= 3 => {
             let img = std::fs::read(&args[1]).unwrap_or_else(|e| die(format!("{}: {}", args[1], e)));
             let mut im = lifter::Image::main(img);
-            if !args.iter().any(|a| a == "--no-patches") {
+            let no_patches = args.iter().any(|a| a == "--no-patches");
+            if !no_patches {
                 game::patches(&mut im).unwrap_or_else(|e| die(e));
             }
             lifter::eh::lift_main(&im, Path::new(&args[2]), &mut |l| println!("{}", l)).unwrap_or_else(|e| die(e));
+            if im.game && !no_patches {
+                game::post_lift(Path::new(&args[2]), &mut |l| println!("{}", l)).unwrap_or_else(|e| die(e));
+            }
         }
         Some("setup") => std::process::exit(setup::main(&args[1..])),
         Some("check-freestanding") => std::process::exit(freestanding_check::main(&args)),

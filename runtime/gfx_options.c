@@ -279,19 +279,40 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
     }
     if (f) fclose(f);
     if (!o->frame_rate) o->frame_rate = 60;
-    /* [Recomps#1] aspect = wide: the game draws at the primary monitor's shape, 720 high (RECOMPS_UW_WIDTH). A set variable wins. */
-    if (o->wide_width < 0) {
-        o->wide_width = 0;
-        if (SDL_InitSubSystem(SDL_INIT_VIDEO)) {
-            SDL_Rect b;
-            if (SDL_GetDisplayBounds(SDL_GetPrimaryDisplay(), &b) && b.h > 0) {
-                int w = (int)(720.0 * b.w / b.h + 0.5) & ~1;
-                o->wide_width = w > 1280 ? (w > 8192 ? 8192 : w) : 0;
+    /* [Recomps#1] aspect = wide: the game draws at the monitor's shape, 720 high (RECOMPS_UW_WIDTH). A set variable wins.
+     * Startup only (!arg): gfx_option_set reloads on pcmenu's thread while the game window is live, where SDL video
+     * init/quit is unsafe and the running game's render width cannot change mid-session. */
+    if (!arg) {
+        const char *uwe = getenv("RECOMPS_UW_WIDTH");
+        int env_w = uwe ? atoi(uwe) : 0;
+        if (env_w > 1280) env_w = env_w > 8192 ? 8192 : env_w; else env_w = 0;
+        if (o->wide_width < 0) {
+            o->wide_width = env_w;
+            if (!o->wide_width) {
+                int was_init = (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) != 0;
+                if (was_init || SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+                    SDL_Window *lw = (SDL_Window *)SDL_GetPointerProperty(SDL_GetGlobalProperties(), "moonriver.window", NULL);
+                    SDL_DisplayID did = lw ? SDL_GetDisplayForWindow(lw) : 0;
+                    if (!did) did = SDL_GetPrimaryDisplay();
+                    SDL_Rect b;
+                    int dw = 0, dh = 0;
+                    if (did && SDL_GetDisplayBounds(did, &b) && b.w > 0 && b.h > 0) { dw = b.w; dh = b.h; }
+                    else if (did) { const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(did); if (dm && dm->w > 0 && dm->h > 0) { dw = dm->w; dh = dm->h; } }
+                    if (dw > 0 && dh > 0) {
+                        int w = (int)(720.0 * dw / dh + 0.5) & ~1;
+                        o->wide_width = w > 1280 ? (w > 8192 ? 8192 : w) : 0;
+                    }
+                    if (!was_init) SDL_QuitSubSystem(SDL_INIT_VIDEO);
+                }
             }
-            SDL_QuitSubSystem(SDL_INIT_VIDEO);
+            if (o->wide_width && !env_w) { char n[16]; snprintf(n, sizeof n, "%d", o->wide_width); _putenv_s("RECOMPS_UW_WIDTH", n); }
+            if (o->wide_width) printf("graphics options: aspect=wide: %dx720 (RECOMPS_UW_WIDTH%s)\n", o->wide_width, env_w ? ", from environment" : "");
+            else printf("graphics options: aspect=wide: the monitor is 16:9 or narrower, so the picture stays 16:9\n");
+        } else if (env_w) {
+            o->wide_width = env_w;
         }
-        if (o->wide_width && !getenv("RECOMPS_UW_WIDTH")) { char n[16]; snprintf(n, sizeof n, "%d", o->wide_width); _putenv_s("RECOMPS_UW_WIDTH", n); }
-        printf("graphics options: aspect=wide: %s\n", o->wide_width ? "the game draws wider than 16:9 (RECOMPS_UW_WIDTH)" : "the monitor is 16:9 or narrower, so the picture stays 16:9");
+    } else if (o->wide_width < 0) {
+        o->wide_width = g_opt.wide_width;
     }
     if (getenv("MR_UPSCALER")) o->upscaler = upscaler_of(getenv("MR_UPSCALER"));      /* [moonriver] issue 118 */
     {   /* [moonriver] the mip bias: -1, or MR_TEXTURE_LOD_BIAS (-3 .. 3) */
@@ -339,7 +360,7 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
     static const char *const k_win[3] = {"windowed", "borderless", "fullscreen"}, *const k_vs[6] = {"clock", "on", "off", "mailbox", "display", "auto"};
     printf("graphics options: %s (%s): renderer=%s window=%s %dx%d vsync=%s gpu=%s console_mode=%s resolution_scale=%.2f anisotropic_filtering=%d frame_time_overlay=%s aspect=%s%s\n", o->path,
            written ? "written with the defaults" : f ? "read" : "NOT readable, defaults used", o->renderer ? "opengl" : "vulkan", k_win[o->window_mode], o->width, o->height, k_vs[o->present],
-           o->gpu[0] ? o->gpu : "auto", o->handheld ? "handheld" : "docked", o->scale, o->aniso, o->overlay ? "on" : "off", o->aspect_stretch ? "stretch" : "keep", unknown ? " (lines with an unknown key were ignored)" : "");
+           o->gpu[0] ? o->gpu : "auto", o->handheld ? "handheld" : "docked", o->scale, o->aniso, o->overlay ? "on" : "off", o->aspect_stretch ? "stretch" : o->wide_width ? "wide" : "keep", unknown ? " (lines with an unknown key were ignored)" : "");
     {   char pw[16]; static const char *const k_hdr[3] = {"auto", "off", "on"};      /* [Recomps#1] finding 147 */
         if (o->hdr_paper_white > 0) snprintf(pw, sizeof pw, "%.0f", o->hdr_paper_white); else snprintf(pw, sizeof pw, "auto");
         printf("graphics options: hdr=%s hdr_format=%s hdr_paper_white=%s hdr_gamma=%s hdr_peak=%.0f (0 = auto)\n", k_hdr[o->hdr], o->hdr_scrgb ? "scrgb" : "hdr10", pw, o->hdr_srgb ? "srgb" : "2.2", o->hdr_peak); }

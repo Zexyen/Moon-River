@@ -344,6 +344,23 @@ static void adjust_rect(RECT *r, DWORD style, UINT dpi) {   /* the frame around 
     BOOL (WINAPI *af)(RECT *, DWORD, BOOL, DWORD, UINT) = u && g_dpi_aware ? (BOOL (WINAPI *)(RECT *, DWORD, BOOL, DWORD, UINT))(void *)GetProcAddress(u, "AdjustWindowRectExForDpi") : NULL;
     if (!af || !af(r, style, FALSE, 0, dpi)) AdjustWindowRect(r, style, FALSE);
 }
+static int uw_log_env(void) {
+    const char *e = getenv("MR_UW_LOG");
+    if (e && atoi(e)) return 1;
+    e = getenv("SSBU_UW_LOG");
+    return e && atoi(e);
+}
+static void uw_touch_capture(void) {
+    char p[260];
+#ifdef _WIN32
+    const char *t = getenv("TEMP");
+    snprintf(p, sizeof p, "%s\\uw_capture", t && t[0] ? t : ".");
+#else
+    snprintf(p, sizeof p, "/tmp/uw_capture");
+#endif
+    FILE *f = fopen(p, "w");
+    if (f) fclose(f);
+}
 static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (m == 0x02E0) {                               /* WM_DPICHANGED (finding 131): a window moved to a monitor of another scaling */
         if (!gfx_options()->window_mode) { const RECT *s = (const RECT *)l; SetWindowPos(h, NULL, s->left, s->top, s->right - s->left, s->bottom - s->top, SWP_NOZORDER | SWP_NOACTIVATE); }
@@ -368,6 +385,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
         mouse_update(h);
     }
     if (m == WM_KEYDOWN && w == VK_ESCAPE && g_mouse_grab && !fills_monitor(h)) { g_mouse_grab = 0; mouse_update(h); }
+    if (m == WM_KEYDOWN && w == 0x79 /* VK_F10 */ && uw_log_env()) uw_touch_capture();   /* developer aid: capture this frame's draws (nvn_vk_draw.c uw_cap_now) */
     if (m == WM_APP + 7 || m == WM_ACTIVATE || m == WM_SIZE || m == WM_MOVE) { mouse_update(h); if (m == WM_APP + 7) return 0; }
     if (m == WM_SETCURSOR && g_mouse_want && g_mouse_grab && LOWORD(l) == HTCLIENT && GetForegroundWindow() == h) { SetCursor(NULL); return TRUE; }
     if (m == WM_CLOSE) {                             /* the exit request: nn::oe decides (nnmisc.c oe_exit_request) whether the game ends now or after its exit-request handling section */
@@ -712,6 +730,7 @@ static void window_event(SDL_Window *w, const SDL_Event *ev) {
             g_mouse_grab = 0;
             sdl_mouse_update(w);
         }
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F10 && uw_log_env()) uw_touch_capture();   /* developer aid: capture this frame's draws (nvn_vk_draw.c uw_cap_now) */
         if (g_apply_ev && e.type == g_apply_ev) { window_apply(w); return; }
         if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {   /* as WM_CLOSE: nn::oe decides */
             printf("\nwindow closed by the user after %lld frames\n", (long long)g_frames);
