@@ -1,6 +1,8 @@
 #include "update.h"
 #include "platform.h"
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <thread>
@@ -154,6 +156,9 @@ void check(const Paths& paths)
 	fs::remove_all(to_path(paths.build + "/update"), ec);    // what the last update replaced (fails harmlessly if busy)
 	const long long mine = version_number(MR_VERSION);
 	if (mine < 0 || !UPDATE_REPO[0])           // a developer's build, or a project that names no repository to update from
+		return;
+	// started by RecompLauncher: it installs this game's releases itself, and two updaters on one folder fight
+	if (const char* rl = std::getenv("RECOMPLAUNCHER"); rl && !std::strcmp(rl, "1"))
 		return;
 	set(State::checking, "");
 	std::thread([mine] {

@@ -57,8 +57,9 @@ body:
     attributes:
       label: Log
       description: >-
-        Drag the file in here, from the folder Moon River is installed in. Game: `build/run/moon-river-game.log`, taken right
-        after the problem (the next start of the game replaces it). Setup or build: the files in `build/logs/`.
+        Drag the file in here, from the folder Moon River is installed in. Game: `build/run/moon-river-game.log` (from
+        RecompLauncher: `recompdata/logs/`), taken right after the problem (the run before is `moon-river-game.1.log`).
+        Setup or build: the files in `build/logs/`.
     validations:
       required: true
   - type: textarea

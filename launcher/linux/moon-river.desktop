@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Moon River
+Comment=Bayonetta 2, recompiled for PC from your own dump
+Exec=moon-river-launcher
+Icon=moon-river
+Categories=Game;
+Terminal=false

@@ -61,7 +61,9 @@ Windows clang + lld (`deps\llvm`). It needs only a Vulkan driver.
   (`moon-river-launcher --returned <code>`), unless the player closed the window or it was started with `--play`. If
   `libmoonriver.so` is missing or fails to load, the launcher hides its window and runs `build/moon-river-game` instead.
   On Windows the game always runs that way, as `build\moon-river-game.exe` with its own window. Either way the game's
-  output goes to `build/run/moon-river-game.log`.
+  output goes to `build/run/moon-river-game.log`, and the four runs before stay beside it as `moon-river-game.1.log` to
+  `.4.log`. With a data folder (`--data <folder>`, `MR_DATA`, or RecompLauncher's `RECOMPLAUNCHER_DATA`) the logs are
+  in its `logs/`.
 - **Updates.** A release build (`MR_VERSION` `vX.Y.Z`) asks GitHub for the latest release at start and, if it is newer,
   shows a `vX.Y.Z is out` pill and offers `Update to vX.Y.Z` on the title menu. That downloads this platform's archive
   with the system's `curl`, checks it against the SHA-256 digest GitHub lists for it (`build/mrbuild sha256`), unpacks
