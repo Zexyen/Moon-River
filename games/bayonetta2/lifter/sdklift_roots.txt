@@ -1,0 +1,47 @@
+# roots for the sdk lift (tools/wtbuild/src/sdklift.rs), for Bayonetta 2's sdk (nnSdk / NVN 3.6.0).
+# Every NVN entry point and GPU HAL method is found by name / typeinfo from the player's own sdk.elf.
+
+# nvn_sdk.c: texture storage rules (NVN 3.6.0 has no GetRawStorageClass)
+nvn nvnTextureBuilderGetStorageSize
+nvn nvnTextureBuilderGetStorageAlignment
+nvn nvnTextureBuilderGetStorageClass
+nvn nvnTextureBuilderGetSparseTileLayout
+nvn nvnTextureGetSparseTileLayout
+nvn nvnTextureGetStorageClass
+nvn nvnTextureGetStorageSize
+
+# reached through vtables at run time: NvRmGpuDeviceChooseKind -> device +0x30 (get HAL) -> HAL +0x50 (choose kind) -> +0x58..+0x78
+vmethod N12_GLOBAL__N_115NvRmNvgpuDeviceE 30 NvRmNvgpuDevice_get_hal
+vmethod 28NvRmGpu_HwHalFunctions_GM200 50 HwHalFunctions_GM200_vt_50
+vmethod 28NvRmGpu_HwHalFunctions_GM200 58 HwHalFunctions_GM200_vt_58
+vmethod 28NvRmGpu_HwHalFunctions_GM200 60 HwHalFunctions_GM200_vt_60
+vmethod 28NvRmGpu_HwHalFunctions_GM200 68 HwHalFunctions_GM200_vt_68
+vmethod 28NvRmGpu_HwHalFunctions_GM200 70 HwHalFunctions_GM200_vt_70
+vmethod 28NvRmGpu_HwHalFunctions_GM200 78 HwHalFunctions_GM200_vt_78
+
+# nn::mem::NumberLineAllocator (all 10 imports of Bayonetta 2's main): pure SDK code (host calls only nn::os Lock/UnlockMutex, memset).
+_ZN2nn3mem19NumberLineAllocator10InitializeEPFPvmS2_ES2_PFvS2_S2_ES2_b
+_ZN2nn3mem19NumberLineAllocator16GetTotalFreeSizeEv
+_ZN2nn3mem19NumberLineAllocator18GetAllocatableSizeEv
+_ZN2nn3mem19NumberLineAllocator4DumpEmi
+_ZN2nn3mem19NumberLineAllocator4FreeEi
+_ZN2nn3mem19NumberLineAllocator8AddRangeEii
+_ZN2nn3mem19NumberLineAllocator8AllocateEPii
+_ZN2nn3mem19NumberLineAllocator8AllocateEPiii
+_ZN2nn3mem19NumberLineAllocator8FinalizeEv
+_ZN2nn3mem19NumberLineAllocator9GetSizeOfEi
+
+# libc / libc++ the game imports from the sdk: pure
+div
+_ZNSt3__119__shared_weak_count12__add_sharedEv
+_ZNSt3__119__shared_weak_count16__release_sharedEv
+
+# hid / friends pure functions Bayonetta 2's main reaches
+_ZN2nn3hid23GetSixAxisSensorHandlesEPNS0_19SixAxisSensorHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE
+_ZN2nn3hid25GetVibrationDeviceHandlesEPNS0_21VibrationDeviceHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE
+_ZN2nn7friends12UserPresence10InitializeEv
+_ZN2nn7friends12UserPresence14SetDescriptionEPKc
+
+# UserPresence::Initialize -> friends::detail::GetCurrentUser -> account::ListOpenUsers reads the SDK's account-library state,
+# which this runtime models on the host (nnfs.c, one local user): cut it to the host model
+cut _ZN2nn7account13ListOpenUsersEPiPNS0_3UidEi
