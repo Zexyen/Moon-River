@@ -210,7 +210,6 @@ jobs:
           cp launcher/ui/img/icon.png "dist/$name/moon-river.png"
           LD_LIBRARY_PATH= ldd "dist/$name/build/moon-river-launcher" | tee /dev/stderr | grep -q "dist/$name/build/libSDL3.so.0"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
-          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
           ls -la dist
 
       # the same folder as one file, for RecompLauncher (which unpacks it at install and plays it from that folder,
@@ -232,7 +231,6 @@ jobs:
           test -f "$x/recomplauncher.json" && test -x "$x/AppRun" && test -x "$x/build/moon-river-launcher" && test -x "$x/build/mrbuild"
           test -x "$x/deps/llvm/bin/clang" && "$x/deps/llvm/bin/clang" --version
           LD_LIBRARY_PATH= ldd "$x/build/moon-river-launcher" | grep -q "$x/build/libSDL3.so.0"
-          (cd dist && sha256sum "$app" > "$app.sha256")
           ls -la dist
 
       - uses: actions/upload-artifact@v4
@@ -241,7 +239,6 @@ jobs:
           path: |
             dist/*.tar.gz
             dist/*.AppImage
-            dist/*.sha256
 
       - name: Release
         if: github.ref_type == 'tag'
@@ -252,7 +249,6 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.AppImage
-            dist/*.sha256
 
   windows:
     runs-on: ubuntu-24.04
@@ -460,7 +456,7 @@ jobs:
           cp "$RUNNER_TEMP/freetype/FTL.TXT" "$p/licenses/FreeType-FTL.txt"
           cp build/launcher/_deps/rmlui-src/LICENSE.txt "$p/licenses/RmlUi.txt"
           cp "$RUNNER_TEMP/llvm-mingw/x86_64-w64-mingw32/share/mingw32/COPYING.MinGW-w64-runtime.txt" "$p/licenses/MinGW-w64-runtime.txt"
-          (cd dist && zip -q -r -9 "$name.zip" "$name" && sha256sum "$name.zip" > "$name.zip.sha256")
+          (cd dist && zip -q -r -9 "$name.zip" "$name")
           ls -la dist
 
       - uses: actions/upload-artifact@v4
@@ -468,7 +464,6 @@ jobs:
           name: ${{ steps.version.outputs.name }}
           path: |
             dist/*.zip
-            dist/*.sha256
 
   # the archive as a player unpacks it, on Windows: the build tool's own tests, then the link step on stand-in modules
   # with the bundled clang.exe and ld.lld.exe and the prebuilt runtime, run until moon-river-game.exe has mapped the image
@@ -499,7 +494,7 @@ jobs:
         shell: bash
         run: |
           name="${{ steps.version.outputs.name }}"
-          (cd dist && sha256sum -c "$name.zip.sha256" && unzip -q "$name.zip")
+          (cd dist && unzip -q "$name.zip")
           p="$PWD/dist/$name"
           "$p/build/mrbuild.exe" smoke --repo "$p" --prebuilt "$p/prebuilt" --lib "$p/build/SDL3.dll"
 
@@ -511,4 +506,3 @@ jobs:
           generate_release_notes: true
           files: |
             dist/*.zip
-            dist/*.sha256
