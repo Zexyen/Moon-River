@@ -15,7 +15,7 @@ pub const NAME: &str = "bayonetta2";
 pub const RUNTIME_SOURCES: &[&str] = &["prompts.c"];
 
 /// data the game library exports to the runtime besides the tables every game has (../runtime/game_shim_eh.c)
-pub const EXPORTS: &[&str] = &["game_fsr_w", "game_fsr_h", "game_fsr_phases", "game_mv_pairs"];
+pub const EXPORTS: &[&str] = &["game_fsr_w", "game_fsr_h", "game_fsr_phases", "game_mv_pairs", "game_presence"];
 
 // ---- Bayonetta 2 version 1.2 (update v131072)
 pub const DISPLAY_NAME: &str = "Bayonetta 2";

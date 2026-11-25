@@ -36,6 +36,119 @@ __declspec(dllexport) volatile int game_fsr_w, game_fsr_h, game_fsr_phases;
 typedef struct { volatile uint64_t dst, prev; } GameMvPair;
 __declspec(dllexport) GameMvPair game_mv_pairs[1 << 16];
 
+/* [moonriver] Rich Presence state (runtime/achievements.c): chapter (-1 in menus, 0 Records of Time,
+ * 1..17 story chapters, 22..26 Witch Trials I-V), difficulty (0..3), verse (0: none), reserved. */
+__declspec(dllexport) volatile int game_presence[4] = {-1, 0, 0, 0};
+
+/* ============================================================================
+ * 0. Recomp Achievements (docs/ACHIEVEMENTS.md)
+ * ============================================================================ */
+#include "achievements.h"
+
+static uint64_t g_ach_ms_seen, g_ach_ms_sent;
+static int g_ach_defined, g_ach_env = -1;
+
+static int ach_active(void) {
+    if (!host.ach_event) return 0;
+    if (g_ach_env < 0) { const char *e = getenv("RL_SESSION"); g_ach_env = e && e[0]; }
+    return g_ach_env;
+}
+
+static void presence_tick(Ctx *c) {
+    static unsigned frame;
+    if (frame++ & 63) return;
+    uint64_t save_obj = rd64(0x71018668d0ULL);
+    uint64_t phase_mgr = rd64(0x71018669e8ULL);
+    uint64_t ch_table = rd64(0x7101869650ULL);
+    int ch = -1;
+    if (phase_mgr && ch_table) {
+        uint32_t phase_id = rd32(phase_mgr + 44ULL);
+        if (phase_id) {
+            Ctx t = *c;
+            t.x[0] = ch_table;
+            t.x[1] = phase_id;
+            t.x[2] = phase_mgr + 52ULL;
+            t.x[3] = 1ULL;
+            t.x[30] = 0;
+            call_indirect(&t, 0x7100b22a60ULL);
+            ch = (int32_t)(uint32_t)t.x[0];
+        }
+    }
+    static const int wt_diff[5] = { 1, 2, 2, 2, 3 };
+    game_presence[0] = ch;
+    game_presence[1] = (ch >= 22 && ch <= 26) ? wt_diff[ch - 22] : (save_obj ? (int)rd32(save_obj + 492ULL) : 0);
+    game_presence[2] = 0;
+    game_presence[3] = 0;
+}
+
+static void achieve_define_all(void) {
+    for (uint32_t i = 0; i < MR_ACH_COUNT; i++) {
+        const MrAchDef *m = &mr_ach_defs[i];
+        host.ach_event(ACH_EV_DEFINE, m->id, m->title, m->desc, m->score);
+    }
+    host.ach_event(ACH_EV_READY, 0, NULL, NULL, 0);
+    g_ach_defined = 1;
+}
+
+static int8_t achieve_read_chapter(uint64_t save_obj, uint32_t diff, uint32_t ch) {
+    uint64_t slot = save_obj + 500ULL + (uint64_t)diff * 0x804ULL + (uint64_t)ch * 0x4cULL;
+    uint8_t medal = rd8(slot + 16ULL);
+    if (medal >= MR_ACH_MEDAL_STONE && medal <= MR_ACH_MEDAL_PURE_PLATINUM) return (int8_t)medal;
+    uint32_t state = rd32(slot + 68ULL);
+    if (state == 2u || state == 3u) return 0;
+    return -1;
+}
+
+static void achieve_eval_milestones(int live) {
+    if (!ach_active() || !g_ach_defined) return;
+    uint64_t save_obj = rd64(0x71018668d0ULL);
+    if (!save_obj) return;
+    MrAchSnapshot snap;
+    memset(&snap, 0, sizeof snap);
+    for (uint32_t i = 0; i < MR_ACH_STORY_CHAPTERS; i++)
+        for (uint32_t d = 0; d < 4; d++)
+            snap.story[i][d] = achieve_read_chapter(save_obj, d, mr_ach_story_chapters[i]);
+    for (uint32_t i = 0; i < MR_ACH_WITCH_TRIALS; i++) {
+        for (uint32_t d = 0; d < 4; d++) {
+            if (achieve_read_chapter(save_obj, d, mr_ach_witch_trial_chapters[i]) >= 0) {
+                snap.witch_trial_cleared[i] = 1;
+                break;
+            }
+        }
+    }
+    snap.bewitchments_mask = rd32(save_obj + 432ULL);
+    snap.weapons_mask = rd32(save_obj + 0xa46cULL);
+    uint64_t mask = mr_ach_eval(&snap);
+    uint64_t added = mask & ~g_ach_ms_seen;
+    if (added) {
+        uint32_t n_new = (uint32_t)__builtin_popcountll(added);
+        for (uint32_t i = 0; i < MR_ACH_COUNT; i++) {
+            uint64_t bit = 1ull << i;
+            if ((added & bit) && !(g_ach_ms_sent & bit)) {
+                g_ach_ms_sent |= bit;
+                if (live) host.ach_event(ACH_EV_UNLOCK, MR_ACH_BASE + i, NULL, NULL, 0);
+                else host.ach_event(ACH_EV_BITFIELD, MR_ACH_BASE + i, NULL, NULL, n_new);
+            }
+        }
+    }
+    g_ach_ms_seen = mask;
+}
+
+void recomps_ach_live_eval(Ctx *c) {
+    (void)c;
+    achieve_eval_milestones(1);
+}
+
+void recomps_ach_tick(Ctx *c) {
+    static unsigned tick_frame;
+    if (!ach_active()) return;
+    presence_tick(c);
+    unsigned f = tick_frame++;
+    if (!g_ach_defined) achieve_define_all();
+    if ((f & 63) == 0) achieve_eval_milestones(0);
+    host.ach_event(ACH_EV_FRAME, 0, NULL, NULL, 0);
+}
+
 /* ============================================================================
  * 1. Cutscenes keep no deleted character (Findings 146 & 150)
  * ============================================================================ */

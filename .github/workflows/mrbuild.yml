@@ -7,7 +7,7 @@ name: mrbuild
 on:
   pull_request:
     paths: ['tools/mrbuild/**', 'lifter/**', 'games/**', 'runtime/gen_static/**', 'runtime/freestanding/**',
-            'runtime/*.h', 'runtime/mx_translate.c', 'runtime/tex_decode.c', 'runtime/tex_pack.c', 'tests/bc7_encode_test.c', 'tests/tex_pack_test.c', 'tests/plat_hash_test.c', 'tests/mx_loop_guard_test.c', 'tests/mx_quad_test.c', 'tests/mx_prev_test.c', 'tests/mv_match_test.c', 'tools/lifter-check/**', '.gitattributes', '.github/workflows/mrbuild.yml']
+            'runtime/*.h', 'runtime/mx_translate.c', 'runtime/tex_decode.c', 'runtime/tex_pack.c', 'runtime/achievements.c', 'runtime/third_party/rl_achievements/**', 'tests/achievements_test.c', 'tests/bc7_encode_test.c', 'tests/tex_pack_test.c', 'tests/plat_hash_test.c', 'tests/mx_loop_guard_test.c', 'tests/mx_quad_test.c', 'tests/mx_prev_test.c', 'tests/mv_match_test.c', 'tools/lifter-check/**', '.gitattributes', '.github/workflows/mrbuild.yml']
   workflow_dispatch:
 
 jobs:
@@ -73,6 +73,21 @@ jobs:
           "$RUNNER_TEMP/rs_pyramid_test"
           clang -O2 -Wall -I runtime tests/fsr_dither_test.c -o "$RUNNER_TEMP/fsr_dither_test"
           "$RUNNER_TEMP/fsr_dither_test"
+
+      - name: Recomp Achievements (runtime/achievements.c)
+        run: |
+          clang -O2 -Wall -I runtime -I runtime/third_party/rl_achievements/include \
+            -I runtime/third_party/rl_achievements/third_party/cjson \
+            -I runtime/third_party/rl_achievements/third_party/rcheevos/include \
+            -I runtime/third_party/rl_achievements/third_party/rcheevos/src \
+            -DRC_DISABLE_LUA '-D__declspec(x)=' -DMR_VERSION='"v0.1.0"' \
+            tests/achievements_test.c \
+            runtime/third_party/rl_achievements/src/rl_achievements.c \
+            runtime/third_party/rl_achievements/third_party/cjson/cJSON.c \
+            runtime/third_party/rl_achievements/third_party/rcheevos/src/runtime/*.c \
+            runtime/third_party/rl_achievements/third_party/rcheevos/src/util/*.c \
+            -lm -o "$RUNNER_TEMP/achievements_test"
+          "$RUNNER_TEMP/achievements_test"
 
   lifter-check:
     # the shipped lifter against Unicorn: random words of the forms added to the lifter, run in Unicorn and as their lifted C

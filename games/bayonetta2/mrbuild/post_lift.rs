@@ -41,6 +41,8 @@ int recomps_slowmo_fix(void);
 void recomps_slowmo_timer(Ctx *c);
 int recomps_slowmo_align(Ctx *c);
 unsigned recomps_uw_width(void);
+void recomps_ach_tick(Ctx *c);
+void recomps_ach_live_eval(Ctx *c);
 "#;
 
 const FPS_TICKS_TXT: &str = include_str!("../lifter/fps_ticks.txt");
@@ -799,7 +801,7 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
         replace_once(
             ls,
             "L_7100dd1e30: {  uint64_t a = c->x[19] + 208ULL; wr64(a, c->x[20]);  }",
-            "L_7100dd1e30: {  uint64_t a = c->x[19] + 208ULL; wr64(a, c->x[20]);  }\nif (recomps_uncap_on()) recomps_uncap_tick(c, recomps_uncap_f(c->x[19] + 200));",
+            "L_7100dd1e30: {  uint64_t a = c->x[19] + 208ULL; wr64(a, c->x[20]);  }\nif (recomps_uncap_on()) recomps_uncap_tick(c, recomps_uncap_f(c->x[19] + 200));\nrecomps_ach_tick(c);",
         )?;
     }
     // 3b. Present (0x7100ed6ca4) & 30 fps flag (0x7100dc4f4c)
@@ -977,6 +979,21 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
         nswap += 1;
     }
 
+    // ---- 6. Recomp Achievements live unlock hooks ----
+    let mut nach = 0usize;
+    for &(fn_hex, lab, store) in ACH_LIVE_SITES {
+        let fname = file_of(fn_hex)?;
+        load_file(&fname, &mut modified)?;
+        let ls = modified.get_mut(&fname).unwrap();
+        let (lo, hi) = func_range(ls, fn_hex)?;
+        let pfx = format!("L_{}:", lab);
+        let i = (lo..hi)
+            .find(|&k| ls[k].starts_with(&pfx))
+            .ok_or_else(|| format!("post_lift: ach_live site L_{} not found in f_{} ({})", lab, fn_hex, fname))?;
+        ls[i] = patch_ach_live_line(lab, store, &ls[i])?;
+        nach += 1;
+    }
+
     // Write modified c_*.c files
     for (fname, lines) in &modified {
         let out = lines.join("\n");
@@ -992,7 +1009,7 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
     }
 
     log(format!(
-        "bayonetta2 post_lift: {} files patched (event_fix 3 hooks, prompt_fix 5 stores, fps: {} counters + {} reloads in {} files + {} smoothings + clock/present/cine/slowmo, ultrawide {} sites, swap_confirm {} sites)",
+        "bayonetta2 post_lift: {} files patched (event_fix 3 hooks, prompt_fix 5 stores, fps: {} counters + {} reloads in {} files + {} smoothings + clock/present/cine/slowmo, ultrawide {} sites, swap_confirm {} sites, ach_live {} sites)",
         modified.len(),
         nticks,
         nrl,
@@ -1000,8 +1017,31 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
         nsmooth,
         nuw,
         nswap,
+        nach,
     ));
     Ok(())
+}
+
+/// Live achievement evaluation sites (after save_obj state mutations):
+///   - f_7100d943b4: chapter record clear / Play History commit (writes slot + 68 = 3)
+///   - f_7100d9045c: story Bewitchment unlock (sets bit in save_obj + 432)
+///   - f_7100d8fa50: weapon unlock (sets bit in save_obj + 0xa46c)
+///   - f_7100d96c68: alternate weapon unlock (sets bit in save_obj + 0xa46c)
+const ACH_LIVE_SITES: &[(&str, &str, &str)] = &[
+    ("7100d943b4", "7100d9440c", "{  uint64_t a = c->x[8] + 68ULL; wr32(a, (uint32_t)c->x[9]);  }"),
+    ("7100d9045c", "7100d90494", "{  uint64_t a = c->x[8] + 0ULL; wr32(a, (uint32_t)c->x[9]);  }"),
+    ("7100d8fa50", "7100d8fa70", "{  uint64_t a = c->x[8] + ((uint64_t)c->x[10]); wr32(a, (uint32_t)c->x[11]);  }"),
+    ("7100d96c68", "7100d96ce0", "{  uint64_t a = c->x[12] + ((uint64_t)c->x[11]); wr32(a, (uint32_t)c->x[10]);  }"),
+];
+
+fn patch_ach_live_line(lab: &str, store: &str, old: &str) -> Result<String, String> {
+    let orig = format!("L_{}: {}", lab, store);
+    let patched = format!("{} recomps_ach_live_eval(c);   /* [ach_live] */", orig);
+    if old == orig || old == patched {
+        Ok(patched)
+    } else {
+        Err(format!("post_lift: unexpected ach_live line at L_{}: {}", lab, old))
+    }
 }
 
 /// Hardcoded Pro A (bit 4) / Pro B (bit 5) checks in UI dialogs that bypassed
@@ -1256,5 +1296,16 @@ mod tests {
         ].into_iter().map(String::from).collect();
         patch_fs(&mut rot, 0, 4, 1, 0x7100601ed0, true, Some(1), Some(19)).unwrap();
         assert!(rot[1].contains("(c->v[1].f[0] * recomps_fps_fs(c, 0x7100601ed0ULL, c->x[19]))"));
+    }
+
+    #[test]
+    fn ach_live_patch_all_4_sites_and_idempotent() {
+        for &(_, lab, store) in ACH_LIVE_SITES {
+            let input = format!("L_{}: {}", lab, store);
+            let out = patch_ach_live_line(lab, store, &input).unwrap();
+            assert!(out.contains("recomps_ach_live_eval(c);"));
+            assert_eq!(patch_ach_live_line(lab, store, &out).unwrap(), out);
+        }
+        assert!(patch_ach_live_line("7100d9440c", "{ wrong }", "L_7100d9440c: return;").is_err());
     }
 }
