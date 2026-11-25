@@ -1342,6 +1342,21 @@ static VTex *vt_get2(Tex *t, int sync) {
     return vt;
 }
 static VTex *vt_get(Tex *t) { return vt_get2(t, 1); }
+/* [moonriver] One blit per aspect for combined depth+stencil images: a combined depth+stencil vkCmdBlitImage wrote
+ * nothing on Mesa RADV (the copied shadow map stayed zero = a dark rectangular box on the ground). */
+static void blit_image_aspects(VkImage src, VkImage dst, const VkImageBlit *b, VkFilter filter) {
+    const VkImageAspectFlags ds = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    if ((b->srcSubresource.aspectMask & ds) == ds && (b->dstSubresource.aspectMask & ds) == ds) {
+        static const VkImageAspectFlags aspects[2] = {VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_ASPECT_STENCIL_BIT};
+        VkImageBlit r = *b;
+        for (int i = 0; i < 2; i++) {
+            r.srcSubresource.aspectMask = r.dstSubresource.aspectMask = aspects[i];
+            vkCmdBlitImage(R.cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r, VK_FILTER_NEAREST);
+        }
+        return;
+    }
+    vkCmdBlitImage(R.cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, b, filter);
+}
 /* [moonriver] The scale changed while the game runs (nvn_vk_pcmenu_job): render thread, between two commands of the game, perhaps
  * in a frame. Every target of the screen class gets an image of the new size with the old texels blitted over (the game does
  * not draw them all again: a paused scene is a picture it drew once); R.col and R.depth name textures, so the next pass takes
@@ -1370,7 +1385,7 @@ static void rs_apply(void) {
                 b.srcSubresource.aspectMask = vt->aspect; b.srcSubresource.mipLevel = (uint32_t)l; b.srcSubresource.layerCount = (uint32_t)vt->layers; b.dstSubresource = b.srcSubresource;
                 b.srcOffsets[1].x = lvl_(vt->w, l); b.srcOffsets[1].y = lvl_(vt->h, l); b.srcOffsets[1].z = 1;
                 b.dstOffsets[1].x = lvl_(nv->w, l); b.dstOffsets[1].y = lvl_(nv->h, l); b.dstOffsets[1].z = 1;
-                vkCmdBlitImage(R.cmd, vt->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, nv->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, rs_filter(vt));
+                blit_image_aspects(vt->img, nv->img, &b, rs_filter(vt));
             }
         }
         vt_garbage(vt);
@@ -4857,7 +4872,7 @@ static void blit_tex(Tex *s, const View *sv, const int *sr, Tex *d, const View *
     if (vs->samples > 1 || vd->samples > 1) { nvn_vk_missing("a scaled or depth copy of a multisample texture"); return; }
     /* glBlitFramebuffer with FRAMEBUFFER_SRGB off copies the stored values; vkCmdBlitImage converts between an sRGB and a
      * linear format. Same class on both sides = the same values. */
-    vkCmdBlitImage(R.cmd, vs->img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, vd->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, linear && vs->aspect == VK_IMAGE_ASPECT_COLOR_BIT ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
+    blit_image_aspects(vs->img, vd->img, &b, linear && vs->aspect == VK_IMAGE_ASPECT_COLOR_BIT ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
 }
 
 /* ---------------------------------------------------------------- replay */
