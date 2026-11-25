@@ -51,20 +51,48 @@
 			<div class="crumb-sep"></div>
 			<span class="crumb-cur">{{ built ? 'Your dump' : 'First run' }}</span>
 		</div>
+		<div class="stabs">
+			<img class="gl tab-gl" data-attr-src="glyph_tab_l" data-event-click="dump_mode(dump_mode == 0 ? 1 : 0)"/>
+			<div class="t" data-class-on="dump_mode == 1" data-event-click="dump_mode(1)">NSP / XCI</div>
+			<div class="t" data-class-on="dump_mode == 0" data-event-click="dump_mode(0)">Extracted folder</div>
+			<img class="gl tab-gl" data-attr-src="glyph_tab_r" data-event-click="dump_mode(dump_mode == 0 ? 1 : 0)"/>
+		</div>
 		<div class="lead">
 			<h2>Point the launcher at your copy of the game</h2>
-			<p>Select a folder holding <em>exefs</em> and <em>romfs</em> extracted from your own Nintendo Switch copy of Bayonetta 2 (version 1.2).</p>
-			<p>Nothing is downloaded, decrypted elsewhere or sent anywhere. You do this once, and updates rebuild only what changed.</p>
+			<p data-if="dump_mode == 1">Select your own <em>NSP</em> or <em>XCI</em> files and <em>prod.keys</em> from your Nintendo Switch copy of Bayonetta 2 (version 1.2). Everything is extracted locally.</p>
+			<p data-if="dump_mode == 0">Select a folder holding <em>exefs</em> and <em>romfs</em> extracted from your own Nintendo Switch copy of Bayonetta 2 (version 1.2).</p>
+			<p>Nothing is downloaded or sent anywhere. You do this once, and updates rebuild only what changed.</p>
 		</div>
-		<div class="col">
-			<div class="fld">
+		<div class="col setup-col">
+			<div class="fld" data-if="dump_mode == 1">
+				<div class="fld-label">Base game (NSP / XCI, or merged)</div>
+				<div class="fld-row">
+					<input type="text" class="inp autofocus" data-value="dump"/>
+					<div class="btn" data-event-click="browse(0)"><span>Browse</span></div>
+				</div>
+			</div>
+			<div class="fld" data-if="dump_mode == 1">
+				<div class="fld-label">Update 1.2 (NSP, optional if merged)</div>
+				<div class="fld-row">
+					<input type="text" class="inp" data-value="update_pkg"/>
+					<div class="btn" data-event-click="browse(1)"><span>Browse</span></div>
+				</div>
+			</div>
+			<div class="fld" data-if="dump_mode == 1">
+				<div class="fld-label">Console keys (prod.keys)</div>
+				<div class="fld-row">
+					<input type="text" class="inp" data-value="prod_keys"/>
+					<div class="btn" data-event-click="browse(2)"><span>Browse</span></div>
+				</div>
+			</div>
+			<div class="fld" data-if="dump_mode == 0">
 				<div class="fld-label">Dump folder</div>
 				<div class="fld-row">
 					<input type="text" class="inp autofocus" data-value="dump"/>
-					<div class="btn" data-event-click="browse()"><span>Browse</span></div>
+					<div class="btn" data-event-click="browse(0)"><span>Browse</span></div>
 				</div>
 			</div>
-			<div class="rw compact" data-event-click="toggle_move()">
+			<div class="rw compact" data-if="dump_mode == 0" data-event-click="toggle_move()">
 				<div class="sw" data-class-y="move_dump"><div class="knob"></div></div>
 				<div class="k">
 					<div class="rw-name">{{ move_dump ? 'Move the game data here' : 'Copy the game data here' }}</div>
@@ -91,11 +119,12 @@
 				<div class="btn" data-event-click="go('title')"><span>Back</span></div>
 			</div>
 		</div>
-		<div class="band2">{{ verified ? 'Your dump checks out. Begin the build.' : checking ? 'Checking your dump. This takes about a minute.' : 'Choose your dump folder, then check the dump.' }}</div>
+		<div class="band2">{{ verified ? 'Your dump checks out. Begin the build.' : checking ? 'Checking your dump. This takes about a minute.' : (dump_mode == 1 ? 'Choose your NSP/XCI files and prod.keys, then check.' : 'Choose your dump folder, then check the dump.') }}</div>
 		<div class="foot">
 			<img class="ficon" src="img/icon.png"/>
 			<div class="fl">{{ setup_footer }}</div>
 			<div class="grow"></div>
+			<div class="hint" key="e"><img class="gl" key="q" data-attr-src="glyph_tab_l"/><img class="gl" data-attr-src="glyph_tab_r"/><span>Source</span></div>
 			<div class="hint" key="ok"><img class="gl" data-attr-src="glyph_ok"/><span>OK</span></div>
 			<div class="hint" key="back"><img class="gl" data-attr-src="glyph_back"/><span>Back</span></div>
 		</div>

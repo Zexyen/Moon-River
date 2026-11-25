@@ -22,8 +22,9 @@ and the link step splits the runtime from the player's tables (below).
 
 ```
 cargo build --release --manifest-path tools/mrbuild/Cargo.toml
-tools/mrbuild/target/release/mrbuild setup --dump <your dump folder> [--jobs N] [--only <step> | --from <step>]
-                                           [--status] [--accept-modified] [--move-dump] [--mods <folder>] [--llvm <folder>]
+tools/mrbuild/target/release/mrbuild setup --dump <folder|.nsp|.xci> [--update <.nsp|.xci>] [--keys <prod.keys>]
+                                           [--jobs N] [--only <step> | --from <step>] [--status] [--accept-modified]
+                                           [--move-dump] [--mods <folder>] [--llvm <folder>]
 ```
 
 `--jobs N` defaults to half the logical CPUs (at most 24), for `compile`.
@@ -33,16 +34,17 @@ where it was never built, the launcher says to run the `cargo build` line above.
 
 ## Steps
 
-Your dump is one folder with what you extracted from your own console and copy of Bayonetta 3 with your own tools (this
-project decrypts nothing and reads no keys): `exefs/` (`main`, `sdk`, `subsdk0`, `rtld`, `main.npdm`, plain NSO files)
-and `romfs/` (the `.pkz` archives and `movie/`). Every step derives its files from the dump into `targets/` and `build/`
-(both ignored by git; never upload them). A finished step is skipped; `--from <step>` repeats it and the rest.
+Your dump can be either your own Switch **NSP / XCI** packages (base + Update 1.2, a merged XCI/NSP, or a folder holding
+both) together with your own console `prod.keys` (`src/switch/`; no keys or game data are ever shipped), or an already-extracted
+folder holding `exefs/` (`main`, `sdk`, `subsdk0`, `rtld`, `main.npdm`, plain NSO files) and `romfs/`. Every step derives its
+files from the dump into `targets/` and `build/` (both ignored by git; never upload them). A finished step is skipped;
+`--from <step>` repeats it and the rest.
 
 | step | what |
 |---|---|
 | deps | the compiler (`deps/llvm` or the system's clang and lld) and, when the runtime is not prebuilt, its libraries (always runs) |
 | verify | the dump is the exact version this port handles (SHA-256, NSO build ID, RomFS manifest; `src/setup.rs`); explains a mismatch |
-| convert | main, sdk, subsdk0 (NSO) -> `targets/exefs/*.elf` (LZ4, segment hashes checked); the dump's romfs into `targets/romfs` (copied, hard links on the same drive, or moved with `--move-dump`) |
+| convert | extracts ExeFS (`targets/exefs`) and RomFS (`targets/romfs`) when given NSP/XCI, or places an extracted folder into `targets/`; converts `main`, `sdk`, `subsdk0` (NSO) -> `targets/exefs/*.elf` (LZ4, segment hashes checked) |
 | mods | optional: code mods (`*.pchtxt`, `*.ips`) patched into `targets/exefs/main.elf` ("Mods" below; always runs, to notice a changed mods folder) |
 | tables | `runtime/gen/` from your sdk and main (layout, imports, lifted SDK functions, SDK constants), plus the copies of `runtime/gen_static/` |
 | lift | your main.elf -> `build/gen_eh` (C) |
@@ -54,6 +56,8 @@ and `romfs/` (the `.pkz` archives and `movie/`). Every step derives its files fr
 
 Mostly for developers; `--repo <folder>` names the checkout (default: the current folder).
 
+- `extract <base.nsp|.xci|folder> [<update.nsp>] [--keys <prod.keys>] --out <folder>`: standalone extraction of `exefs/` and `romfs/` from your own Switch packages.
+- `find-keys [--dump <path>] [--update <path>]`: prints the path to an auto-discovered `prod.keys` file if one exists.
 - `nso2elf <in> <out>`, `lift <main.elf> <outdir> [--no-patches]`, `tables <repo>`, `compile [--jobs N]`, `link`: one step on its own.
 - `lift-words`: lines `<word> <pc> <entry> <end>` (hex) on stdin, one lifted statement a line out.
 - `runtime --out <dir>` (the prebuilt runtime, CI).

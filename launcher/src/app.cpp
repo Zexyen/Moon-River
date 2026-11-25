@@ -210,6 +210,16 @@ const char* start_error(const std::string& repo)
 	return build_command(repo, "setup").empty() ? NO_BUILD_TOOL : "The build tool cannot be started.";
 }
 
+bool is_pkg_path(const std::string& p)
+{
+	if (p.size() < 4)
+		return false;
+	std::string ext = p.substr(p.size() - 4);
+	for (char& c : ext)
+		c = char(std::tolower(static_cast<unsigned char>(c)));
+	return ext == ".nsp" || ext == ".xci";
+}
+
 std::string format_threads_and_space(const std::string& dir)
 {
 	const unsigned threads = std::max(1u, std::thread::hardware_concurrency());
@@ -250,11 +260,18 @@ bool App::init(int argc, char** argv)
 		return false;
 	SetupState st = SetupState::read(paths.build);
 	dump = st.dump;
-	model.DirtyVariable("dump");            // (the folder box was made when the model was, still empty)
+	update_pkg = st.update;
+	prod_keys = st.keys;
+	dump_mode = (st.dump.empty() || !st.update.empty() || is_pkg_path(st.dump)) ? 1 : 0;
+	if (prod_keys.empty())
+		prod_keys = find_prod_keys(paths, dump);
+	for (const char* v : {"dump_mode", "dump", "update_pkg", "prod_keys"})
+		model.DirtyVariable(v);
 	const unsigned threads = std::max(1u, std::thread::hardware_concurrency());
 	{
 		char buf[160];
-		std::snprintf(buf, sizeof buf, "About 4 minutes on %u threads · About 15 GB free space", threads);
+		std::snprintf(buf, sizeof buf, "About 4 minutes on %u threads · %s", threads,
+			dump_mode == 1 ? "About 24 GB free space for NSP/XCI" : "About 15 GB free space");
 		setup_footer = buf;
 		model.DirtyVariable("setup_footer");
 	}
@@ -441,7 +458,10 @@ void App::bind_model()
 	c.Bind("setup_footer", &setup_footer);
 	c.Bind("build_footer", &build_footer);
 	c.Bind("update_tag", &update_tag);
+	c.Bind("dump_mode", &dump_mode);
 	c.Bind("dump", &dump);
+	c.Bind("update_pkg", &update_pkg);
+	c.Bind("prod_keys", &prod_keys);
 	c.Bind("checking", &checking);
 	c.Bind("verified", &verified);
 	c.Bind("move_dump", &move_dump);
@@ -499,6 +519,7 @@ void App::bind_model()
 	});
 	c.BindEventCallback("quit", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { running = false; });
 	c.BindEventCallback("tab", [this, arg_int](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) { set_tab(arg_int(a, 0)); });
+	c.BindEventCallback("dump_mode", [this, arg_int](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) { set_dump_mode(arg_int(a, 0)); });
 	c.BindEventCallback("convert_textures", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { convert_textures(); });
 	c.BindEventCallback("switch_textures", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { switch_textures(); });
 	c.BindEventCallback("remove_textures", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { remove_textures(); });
@@ -510,7 +531,7 @@ void App::bind_model()
 		shortcut_note = said;
 		model.DirtyVariable("shortcut_note");
 	});
-	c.BindEventCallback("browse", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { browse(); });
+	c.BindEventCallback("browse", [this, arg_int](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) { browse(arg_int(a, 0)); });
 	c.BindEventCallback("check_dump", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { check_dump(); });
 	c.BindEventCallback("toggle_move", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
 		move_dump = !move_dump;
@@ -886,7 +907,14 @@ void App::handle(SDL_Event& ev)
 		hover_focus();
 	// a click into the dump folder's box, or an IME's text, is using it too: the mouse leaves its focus there
 	if (Rml::Element* f = ctx->GetFocusElement(); (ev.type == SDL_EVENT_MOUSE_BUTTON_DOWN || ev.type == SDL_EVENT_TEXT_INPUT) && f && f->GetTagName() == "input")
+	{
 		typed = true;
+		if (ev.type == SDL_EVENT_TEXT_INPUT && screen == "setup" && verified)
+		{
+			verified = false;
+			model.DirtyVariable("verified");
+		}
+	}
 	if (ev.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || ev.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED)
 		rescale();
 }
@@ -1007,6 +1035,11 @@ bool App::key(Rml::Input::KeyIdentifier k)
 	if ((k == KI_Q || k == KI_E) && screen == "settings" && !editing)
 	{
 		set_tab(tab + (k == KI_Q ? -1 : 1));
+		return true;
+	}
+	if ((k == KI_Q || k == KI_E) && screen == "setup" && !editing)
+	{
+		set_dump_mode(dump_mode == 0 ? 1 : 0);
 		return true;
 	}
 	if ((k == KI_LEFT || k == KI_RIGHT) && control && control->IsClassSet("setting"))
@@ -1274,8 +1307,8 @@ void App::refresh_build()
 	for (const std::string& s : all)
 		if (is_done(s))
 			progress += weight(s);
-	if (run && runner.current == "compile" && runner.to_compile > 0)
-		progress += weight("compile") * runner.compiled / runner.to_compile;
+	if (run && (runner.current == "compile" || runner.current == "convert") && runner.to_compile > 0)
+		progress += weight(runner.current) * runner.compiled / runner.to_compile;
 	const bool complete = !run && std::all_of(all.begin(), all.end(), is_done);
 	if (complete)
 		progress = 1;
@@ -1300,7 +1333,7 @@ void App::refresh_build()
 		{
 			r.state = "run";
 			active_group = gi;
-			if (runner.current == "compile" && runner.to_compile > 0)
+			if ((runner.current == "compile" || runner.current == "convert") && runner.to_compile > 0)
 				r.note = std::to_string(runner.compiled) + " of " + std::to_string(runner.to_compile) + " files";
 			r.right = phase_of(runner.current);
 		}
@@ -1339,7 +1372,7 @@ void App::refresh_build()
 	{
 		std::string doing = phase_of(runner.current);
 		doing[0] = char(std::toupper(static_cast<unsigned char>(doing[0])));
-		if (runner.current == "compile" && runner.to_compile > 0)
+		if ((runner.current == "compile" || runner.current == "convert") && runner.to_compile > 0)
 			doing += " " + std::to_string(runner.compiled) + " of " + std::to_string(runner.to_compile) + " files";
 		build_line = doing + ". Close the window any time and it resumes.";
 	}
@@ -1550,19 +1583,101 @@ void App::remove_textures()
 }
 
 // ---------------------------------------------------------------------------------------------------- work
-void App::browse()
+void App::set_dump_mode(int mode)
 {
-	SDL_ShowOpenFolderDialog(
-		[](void* user, const char* const* list, int) {
-			App* app = static_cast<App*>(user);
-			if (list && list[0])
-			{
-				std::lock_guard<std::mutex> lock(app->picked_mutex);
-				app->picked_folder = list[0];
-				app->picked = true;
-			}
-		},
-		this, window, dump.empty() ? nullptr : dump.c_str(), false);
+	const int next = mode ? 1 : 0;
+	if (next == dump_mode || runner.running())
+		return;
+	dump_mode = next;
+	verified = false;
+	dump_modified = accept_modified = false;
+	checks.clear();
+	if (dump_mode == 1 && prod_keys.empty())
+		prod_keys = find_prod_keys(paths, dump);
+	const unsigned threads = std::max(1u, std::thread::hardware_concurrency());
+	char buf[160];
+	std::snprintf(buf, sizeof buf, "About 4 minutes on %u threads · %s", threads,
+		dump_mode == 1 ? "About 24 GB free space for NSP/XCI" : "About 15 GB free space");
+	setup_footer = buf;
+	for (const char* v : {"dump_mode", "prod_keys", "verified", "dump_modified", "accept_modified", "checks", "setup_footer"})
+		model.DirtyVariable(v);
+	want_focus = true;
+	sound(0);
+}
+
+void App::browse(int target)
+{
+	if (target == 0 && dump_mode == 0)
+	{
+		SDL_ShowOpenFolderDialog(
+			[](void* user, const char* const* list, int) {
+				App* app = static_cast<App*>(user);
+				if (list && list[0])
+				{
+					std::lock_guard<std::mutex> lock(app->picked_mutex);
+					app->picked_folder = list[0];
+					app->picked_target = 0;
+					app->picked = true;
+				}
+			},
+			this, window, dump.empty() ? nullptr : dump.c_str(), false);
+		return;
+	}
+	static const SDL_DialogFileFilter pkg_filters[] = {
+		{"Switch packages (NSP, XCI)", "nsp;xci"},
+		{"All files", "*"},
+	};
+	static const SDL_DialogFileFilter key_filters[] = {
+		{"Switch keys (prod.keys)", "keys"},
+		{"All files", "*"},
+	};
+	if (target == 0)
+	{
+		SDL_ShowOpenFileDialog(
+			[](void* user, const char* const* list, int) {
+				App* app = static_cast<App*>(user);
+				if (list && list[0])
+				{
+					std::lock_guard<std::mutex> lock(app->picked_mutex);
+					app->picked_folder = list[0];
+					app->picked_target = 0;
+					app->picked = true;
+				}
+			},
+			this, window, pkg_filters, 2, dump.empty() ? nullptr : dump.c_str(), false);
+	}
+	else if (target == 1)
+	{
+		const char* def = !update_pkg.empty() ? update_pkg.c_str() : dump.empty() ? nullptr : dump.c_str();
+		SDL_ShowOpenFileDialog(
+			[](void* user, const char* const* list, int) {
+				App* app = static_cast<App*>(user);
+				if (list && list[0])
+				{
+					std::lock_guard<std::mutex> lock(app->picked_mutex);
+					app->picked_folder = list[0];
+					app->picked_target = 1;
+					app->picked = true;
+				}
+			},
+			this, window, pkg_filters, 2, def, false);
+	}
+	else
+	{
+		const char* def = !prod_keys.empty() ? prod_keys.c_str() : dump.empty() ? nullptr : dump.c_str();
+		SDL_ShowOpenFileDialog(
+			[](void* user, const char* const* list, int) {
+				App* app = static_cast<App*>(user);
+				if (list && list[0])
+				{
+					std::lock_guard<std::mutex> lock(app->picked_mutex);
+					app->picked_folder = list[0];
+					app->picked_target = 2;
+					app->picked = true;
+				}
+			},
+			this, window, key_filters, 2, def, false);
+	}
 }
 
 void App::check_dump()
@@ -1571,7 +1686,7 @@ void App::check_dump()
 	{
 		if (dump.empty())
 		{
-			checks = {{"Choose the folder of your dump first", "", "fail"}};
+			checks = {{dump_mode == 1 ? "Choose your base NSP or XCI file first" : "Choose the folder of your dump first", "", "fail"}};
 			model.DirtyVariable("checks");
 		}
 		return;
@@ -1579,6 +1694,21 @@ void App::check_dump()
 	verified = false;
 	checks = {{"Starting the checks", "", "run"}};
 	std::vector<std::string> args = {"--dump", dump, "--only", "verify"};
+	if (dump_mode == 1)
+	{
+		args.push_back("--update");
+		args.push_back(update_pkg);
+		if (!prod_keys.empty())
+		{
+			args.push_back("--keys");
+			args.push_back(prod_keys);
+		}
+	}
+	else
+	{
+		args.push_back("--update");
+		args.push_back("");
+	}
 	if (accept_modified)
 		args.push_back("--accept-modified");
 	if (runner.start(paths.repo, args))
@@ -1598,9 +1728,26 @@ void App::start_build()
 		return;
 	std::vector<std::string> args;
 	if (!dump.empty())
+	{
 		args = {"--dump", dump};
-	if (move_dump)
-		args.push_back("--move-dump");
+		if (dump_mode == 1)
+		{
+			args.push_back("--update");
+			args.push_back(update_pkg);
+			if (!prod_keys.empty())
+			{
+				args.push_back("--keys");
+				args.push_back(prod_keys);
+			}
+		}
+		else
+		{
+			args.push_back("--update");
+			args.push_back("");
+			if (move_dump)
+				args.push_back("--move-dump");
+		}
+	}
 	if (accept_modified)
 		args.push_back("--accept-modified");
 	build_error.clear();
@@ -1654,10 +1801,17 @@ void App::tick()
 		if (picked)
 		{
 			picked = false;
-			dump = picked_folder;
+			if (picked_target == 1)
+				update_pkg = picked_folder;
+			else if (picked_target == 2)
+				prod_keys = picked_folder;
+			else
+				dump = picked_folder;
+			if (dump_mode == 1 && picked_target != 2 && prod_keys.empty())
+				prod_keys = find_prod_keys(paths, picked_folder);
 			verified = false;
-			dump_modified = accept_modified = false;    // a new folder is checked as it is
-			for (const char* v : {"dump", "verified", "dump_modified", "accept_modified"})
+			dump_modified = accept_modified = false;    // a new file or folder is checked as it is
+			for (const char* v : {"dump", "update_pkg", "prod_keys", "verified", "dump_modified", "accept_modified"})
 				model.DirtyVariable(v);
 		}
 	}
@@ -1701,6 +1855,15 @@ void App::tick()
 		{
 			checking = false;
 			verified = std::find(runner.done.begin(), runner.done.end(), "verify") != runner.done.end();
+			if (verified && prod_keys.empty())
+			{
+				const SetupState st = SetupState::read(paths.build);
+				if (!st.keys.empty())
+				{
+					prod_keys = st.keys;
+					model.DirtyVariable("prod_keys");
+				}
+			}
 			CheckRow why = checks.empty() ? CheckRow{"The dump did not pass the checks", "", "fail"} : checks.back();
 			why.state = "fail";
 			checks = verified ? std::vector<CheckRow>{{"Version verified", "", "done"}} : std::vector<CheckRow>{why};

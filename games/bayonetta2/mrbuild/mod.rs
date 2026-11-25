@@ -18,7 +18,13 @@ pub const RUNTIME_SOURCES: &[&str] = &[];
 pub const EXPORTS: &[&str] = &["game_fsr_w", "game_fsr_h", "game_fsr_phases", "game_mv_pairs"];
 
 // ---- Bayonetta 2 version 1.2 (update v131072)
+pub const DISPLAY_NAME: &str = "Bayonetta 2";
+pub const UPDATE_LABEL: &str = "Update 1.2";
 pub const VERSION: &str = "Bayonetta 2 version 1.2 (update v131072)";
+/// Nintendo Switch Title IDs for Bayonetta 2 (base: 01007960049A0000, update: 01007960049A0800)
+pub const TITLE_MASK: u64 = 0xFFFF_FFFF_FFFF_F000;
+pub const TITLE_BASE_ID: u64 = 0x0100_7960_049A_0000;
+pub const TITLE_UPDATE_ID: u64 = 0x0100_7960_049A_0800;
 /// the dump's exefs files: name, size, sha256, NSO build id. The first is main
 pub const EXEFS: &[(&str, u64, &str, Option<&str>)] = &[
     (

@@ -356,6 +356,29 @@ body {
 	height: 540dp;
 }
 
+.setup-col {
+	top: 130dp;
+	height: 540dp;
+}
+
+.setup-col .fld {
+	margin-bottom: 12dp;
+}
+
+.setup-col input.inp {
+	height: 40dp;
+	line-height: 38dp;
+}
+
+.setup-col .fld-row .btn {
+	height: 40dp;
+	line-height: 38dp;
+}
+
+.setup-col .acts {
+	margin-top: 16dp;
+}
+
 /* ---- inputs & buttons ---- */
 .fld {
 	margin-bottom: 16dp;

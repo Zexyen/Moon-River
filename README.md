@@ -42,8 +42,9 @@ Everything derived from your dump is generated locally into `targets/`, `build/`
 
 ## Requirements
 
-- A legitimate dump of **Bayonetta 2** (Nintendo Switch, v1.2 / update v131072) containing `exefs/` (`main`, `sdk`,
-  `main.npdm`, …) and `romfs/`.
+- A legitimate dump of **Bayonetta 2** (Nintendo Switch, v1.2 / update v131072), either:
+  - **NSP / XCI files** dumped from your own console (your base game `.nsp`/`.xci` + Update 1.2 `.nsp`, or a merged `.xci`/`.nsp`, or a folder holding both) together with your own `prod.keys` (auto-detected beside the packages or in `~/.switch/prod.keys`, or passed with `--keys`). Moon River extracts everything locally and ships no keys or game data.
+  - **An extracted dump folder** containing `exefs/` (`main`, `sdk`, `subsdk0`, `rtld`, `main.npdm`, …) and `romfs/`.
 - **Build tools**: Rust (`cargo`), `clang` + `lld` (LLVM 19+), `cmake` + `ninja` (for the launcher).
 - **System libraries** (Linux): SDL3, Vulkan headers, `glslang`, FFmpeg (`libavformat`, `libavcodec`, `libswscale`,
   `libswresample`, `libavutil`), OpenGL, FreeType.
@@ -59,10 +60,14 @@ cargo build --release --manifest-path tools/mrbuild/Cargo.toml
 ### 2. Recompile your Bayonetta 2 dump
 
 ```bash
+# Directly from your NSP/XCI files:
+./tools/mrbuild/target/release/mrbuild setup --dump <base.nsp|.xci> --update <update-1.2.nsp> [--keys <prod.keys>]
+
+# Or from an already-extracted dump folder:
 ./tools/mrbuild/target/release/mrbuild setup --dump /path/to/your/bayonetta2/dump
 ```
 
-`mrbuild setup` verifies your dump, converts NSOs to ELFs, applies any mods in `mods/`, extracts SDK 3.6.0 / NVN tables
+`mrbuild setup` verifies your dump, extracts ExeFS/RomFS from NSP/XCI (or copies/moves an extracted folder), converts NSOs to ELFs, applies any mods in `mods/`, extracts SDK 3.6.0 / NVN tables
 and lifts pure SDK routines, lifts `main.elf` to C with Bayonetta 2's post-lift patches, compiles everything in
 parallel, and links `build/game.so`, `build/libmoonriver.so`, and `build/moon-river-game`.
 
