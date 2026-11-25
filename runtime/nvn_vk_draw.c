@@ -5156,6 +5156,17 @@ static int uw_has_screen_tex(int W) {
     }
     return (tex_lookup(1, 0, &t, &v, &sp) & 1) && uw_is_screen_tex(t, W);
 }
+static int uw_is_movie_fx(void) {
+    if (!(R.blend_on & 1)) return 1;
+    VStage *fs = R.prog[1] ? (VStage *)R.prog[1]->st[1].vk : NULL;
+    if (fs && fs->nsmp >= 3) return 1;
+    Tex *t; View v; SamplerParams sp;
+    if ((tex_lookup(1, 0, &t, &v, &sp) & 1) && t && !t->dead) {
+        int w = t->b.width, h = t->b.height;
+        if ((w == 1280 && (h == 720 || h == 736)) || (w == 1920 && (h == 1080 || h == 1088))) return 1;
+    }
+    return 0;
+}
 static int uw_fx_begin(const Cmd *m, int indexed) {
     {   /* the screen-copy pass (Panther Within's zoom blur): unit quad, float3 at stride 12, its 4x4 in block 8 */
         const Range *b = &R.ubo[0][8];
@@ -5181,23 +5192,30 @@ static int uw_fx_begin(const Cmd *m, int indexed) {
         if (!f && ns < 4096 && q[28] == 0 && q[29] == 0 && q[31] == 1.0f) { strcpy(seen[ns++], kk); printf("UWFX f%lld %s\n", nvn_front_frame_next(), kk); }
     }
     float W = (float)g_rs_bw;
-    if (q[16] == 0 || q[21] == 0 || W < 1281.0f || fabsf(q[17]) > 1e-4f || fabsf(q[20]) > 1e-4f || q[28] != 0 || q[29] != 0 || q[30] != 0 || q[31] != 1.0f) return 0;
+    if (q[16] == 0 || q[21] == 0 || W < 1281.0f || fabsf(q[28]) > 1e-4f || fabsf(q[29]) > 1e-4f || q[31] <= 1e-4f) return 0;
+    if (fabsf(q[17]) > 1e-4f * q[31] || fabsf(q[20]) > 1e-4f * q[31]) return 0;
     if (R.vstream[0].stride != 32 || (R.vattr[0] & 0xff) != 0x2e || (R.vattr[5] & 0xff) != 0x2e || !R.vbuf[0].addr) return 0;
     uint64_t lo, hi;
-    if (!uw_vrange(m, indexed, &lo, &hi) || hi - lo > 64 || hi * 32 > R.vbuf[0].size) return 0;
+    if (!uw_vrange(m, indexed, &lo, &hi) || hi - lo > 1024 || hi * 32 > R.vbuf[0].size) return 0;
     float x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f;
     for (uint64_t i = lo; i < hi; i++) {
         const float *v = (const float *)((const uint8_t *)P(R.vbuf[0].addr) + i * 32);
-        float x = q[16] * v[0] + q[19], y = q[21] * v[1] + q[23];
+        float vw = q[28] * v[0] + q[29] * v[1] + q[30] * v[2] + q[31];
+        if (vw <= 1e-4f) return 0;
+        float x = (q[16] * v[0] + q[17] * v[1] + q[18] * v[2] + q[19]) / vw;
+        float y = (q[20] * v[0] + q[21] * v[1] + q[22] * v[2] + q[23]) / vw;
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
     }
     float span = (x1 - x0) * W / 2560.0f;
-    if (uw_log_on() && y0 <= -0.98f && y1 >= 0.98f) { static int n; if (n++ < 40) printf("UWFXQ f%lld vs#%d fs#%d x %.3f..%.3f y %.3f..%.3f span %.3f\n", nvn_front_frame_next(), R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1, x0, x1, y0, y1, span); }
-    if (y0 > -0.98f || y1 < 0.98f || fabsf(x0 + x1) > 0.06f || span < 0.85f || (x0 <= -0.995f && x1 >= 0.995f)) return 0;
-    if (q[0] == 1.0f && q[1] == 1.0f && q[2] == 1.0f && fabsf(q[21] - 2.0f) < 1e-4f && fabsf(q[19] * W - 1280.0f) < 1.0f) { g_uw_bars = W; return 0; }
+    int has_scr = uw_has_screen_tex((int)(W + 0.5f));
+    float ymin = has_scr ? 0.90f : 0.98f;
+    if (uw_log_on() && y0 <= -ymin && y1 >= ymin) { static int n; if (n++ < 40) printf("UWFXQ f%lld vs#%d fs#%d x %.3f..%.3f y %.3f..%.3f span %.3f scr %d\n", nvn_front_frame_next(), R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1, x0, x1, y0, y1, span, has_scr); }
+    if (y0 > -ymin || y1 < ymin || fabsf(x0 + x1) > 0.06f || span < 0.85f || (x0 <= -0.995f && x1 >= 0.995f)) return 0;
+    if (fabsf(q[31] - 1.0f) < 1e-4f && q[0] == 1.0f && q[1] == 1.0f && q[2] == 1.0f && fabsf(q[21] - 2.0f) < 1e-4f && fabsf(q[19] * W - 1280.0f) < 1.0f && uw_is_movie_fx()) { g_uw_bars = W; return 0; }
     uint8_t tmp[256];
     memcpy(tmp, q, (size_t)u->size);
-    ((float *)tmp)[16] *= W / 1280.0f; ((float *)tmp)[19] *= W / 1280.0f;
+    float s = W / 1280.0f;
+    ((float *)tmp)[16] *= s; ((float *)tmp)[17] *= s; ((float *)tmp)[18] *= s; ((float *)tmp)[19] *= s;
     uint8_t *p = g_uw_fx[g_uw_fxn++ & 4095];
     uw_write_cached(p, tmp, (size_t)u->size);
     g_uw_keep = *u; g_uw_on = 1 + 4;
@@ -5294,34 +5312,46 @@ static void uw2d_begin(const Cmd *m, int indexed) {
         if (!f && ns < 4096 && (x1 - x0 > 900 || x0 > 1279.0f || x1 < 1.0f || fabsf(R.viewport[2] - W) > 0.5f)) { strcpy(seen[ns++], kk); printf("UW2D f%lld %s\n", nvn_front_frame_next(), kk); }
     }
     static long long g_uw_bg_frame = -1;
-    static int g_uw_menu_bg = 0;
+    static int g_uw_menu_bg = 0, g_uw_hud_seen = 0, g_uw_menu_prev = 0;
     {
         long long f = nvn_front_frame_next();
-        if (f != g_uw_bg_frame) { g_uw_bg_frame = f; g_uw_menu_bg = 0; }
+        if (f != g_uw_bg_frame) {
+            g_uw_menu_prev = (g_uw_bg_frame >= 0 && f - g_uw_bg_frame <= 4) ? (g_uw_menu_bg && !g_uw_hud_seen) : 0;
+            g_uw_bg_frame = f;
+            g_uw_menu_bg = 0;
+            g_uw_hud_seen = 0;
+        }
     }
     int k = -1;
     int onscreen = fabsf(R.viewport[2] - W) <= 0.5f && !(R.ncol && R.col[0].tex && fabsf((float)R.col[0].tex->b.width - W) > 0.5f);
+    if (onscreen && fabsf(w[3] - 45.0f) < 25.0f && fabsf(w[7] - 52.0f) < 25.0f && x0 >= 15.0f && x1 <= 400.0f && y0 >= 10.0f && y1 <= 110.0f)
+        g_uw_hud_seen = 1;
     if (!onscreen) k = 1;
-    else if (fabsf(x0 + x1 - 1280.0f) < 40.0f && ((x1 - x0 > 1150.0f && x1 - x0 < 1400.0f) || (x1 - x0 >= 1400.0f && x1 - x0 < W - 1.0f && y0 <= 10.0f && y1 >= 710.0f))) { if (y0 <= 10.0f && y1 >= 710.0f) g_uw_menu_bg = 1; k = 1; }
+    else if ((fabsf(x0 + x1 - 1280.0f) < 40.0f && x1 - x0 > 1150.0f && x1 - x0 < 1400.0f) || (fabsf(x0 + x1 - 1280.0f) < 160.0f && x0 <= 10.0f && x1 >= 1270.0f && x1 - x0 < W - 1.0f && y0 <= 10.0f && y1 >= 710.0f)) { if (y0 <= 10.0f && y1 >= 710.0f) g_uw_menu_bg = 1; k = 1; }
     else if (fabsf(x0 + x1 - 1280.0f) < 40.0f && x1 - x0 >= W - 1.0f && y0 <= 10.0f && y1 >= 710.0f) { g_uw_menu_bg = 1; return; }
     else if (x0 < 1.0f && x1 > W - 1.0f && y0 < 1.0f && y1 > 719.0f) { g_uw_menu_bg = 1; k = 0; }
-    else if ((fabsf(w[3] - 1280.0f) < 0.5f && x1 > 1279.0f && x1 < 1281.0f && x0 > 320.0f && 1280.0f - x0 > 1.0f) || (x1 > 1300.0f && x0 > 320.0f && x0 < 1260.0f && y1 - y0 >= 200.0f)) { g_uw_menu_bg = 1; k = 2; }
-    else if ((fabsf(w[3]) < 0.5f && x0 > -1.0f && x0 < 1.0f && x1 > 1.0f && x1 < 960.0f) || (x0 < -20.0f && x1 > 20.0f && x1 < 960.0f && y1 - y0 >= 200.0f)) { g_uw_menu_bg = 1; k = 5; }
-    else if (w[3] > 1280.5f && w[3] < 1280.0f + (W - 1280.0f) * 0.25f) k = 3;
+    else if (y1 - y0 >= 200.0f && ((fabsf(w[3] - 1280.0f) < 0.5f && x1 > 1279.0f && x1 < 1281.0f && x0 > 320.0f && 1280.0f - x0 > 1.0f) || (x1 > 1300.0f && x0 > 320.0f && x0 < 1260.0f))) { g_uw_menu_bg = 1; k = 2; }
+    else if (y1 - y0 >= 200.0f && ((fabsf(w[3]) < 0.5f && x0 > -1.0f && x0 < 1.0f && x1 > 1.0f && x1 < 960.0f) || (x0 < -20.0f && x1 > 20.0f && x1 < 960.0f))) { g_uw_menu_bg = 1; k = 5; }
     else {
-        int wide_hud = !gfx_options()->hud_centre && !g_uw_menu_bg;
+        if (!g_uw_hud_seen && x1 - x0 >= 300.0f && y1 - y0 >= 250.0f && y0 >= 40.0f && y1 <= 680.0f)
+            g_uw_menu_bg = 1;
+        int wide_hud = !gfx_options()->hud_centre && (g_uw_hud_seen || (!g_uw_menu_bg && !g_uw_menu_prev));
         int wbased = w[3] > 1280.0f + (W - 1280.0f) * 0.25f && w[3] <= W + 0.5f && y1 < 140.0f;
         int has_scr = !wbased && hi - lo <= 64 && x1 - x0 > 1.0f && uw_has_screen_tex((int)(W + 0.5f));
         if (wide_hud && wbased) {
             k = 0;
-        } else if (wide_hud && !has_scr && ((x0 < 420.0f && x1 <= 560.0f && y1 <= 240.0f) || (x0 < 240.0f && x1 <= 460.0f && y0 >= 520.0f))) {
+        } else if (wide_hud && w[3] > 1280.5f && w[3] < 1280.0f + (W - 1280.0f) * 0.25f) {
+            k = 3;
+        } else if (wide_hud && !has_scr && ((x0 < 420.0f && x1 <= 560.0f && y1 <= 240.0f) || (x0 < 240.0f && x1 <= 560.0f && y0 >= 440.0f))) {
             k = 0;
-        } else if (wide_hud && !has_scr && ((x0 >= 820.0f && y1 <= 440.0f) || (x0 >= 860.0f && y0 >= 520.0f))) {
+        } else if (wide_hud && !has_scr && ((x0 >= 790.0f && x0 < 1279.0f) || (x0 >= 600.0f && x0 + x1 >= 1920.0f && x0 < 1279.0f))) {
             k = 3;
             if (R.have_scissor && !(R.scissor[0] <= 0 && R.scissor[0] + R.scissor[2] >= (int)W)) {
                 memcpy(g_uw_sc_keep, R.scissor, sizeof g_uw_sc_keep); g_uw_sc_had = R.have_scissor; g_uw_sc = 1;
                 R.scissor[0] += (int)(W - 1280.0f); R.dyn_dirty = 1;
             }
+        } else if (!wide_hud && !has_scr && y0 >= 580.0f && w[0] > 2.0f && fabsf(x0 - w[3]) < 1.0f && x0 >= 1200.0f && x0 < 1279.0f && x1 > 1280.5f && y1 - y0 < 120.0f) {
+            k = 2;
         }
         if (k < 0) {
             if (has_scr) {
@@ -5344,8 +5374,9 @@ static void uw2d_begin(const Cmd *m, int indexed) {
                 }
             }
             int l = (int)((W - 1280.0f) * 0.5f), sx = R.have_scissor ? R.scissor[0] : 0, sw = R.have_scissor ? R.scissor[2] : (int)W;
+            int is_add = (R.blend_on & 1) && R.blend[0][1] == 2 && (R.blend[0][4] == 0 || R.blend[0][4] == 1);
             if (R.have_scissor && !(sx <= 0 && sx + sw >= (int)W)) sx += l;
-            else if (x0 >= 0 && x1 <= 1280.0f && !wbased) return;
+            else if (!wbased && ((x0 >= 0 && x1 <= 1280.0f) || (is_add && x0 < 1260.0f && x1 > 20.0f))) return;
             if (wbased) {
                 float tmp[64];
                 memcpy(tmp, o, (size_t)u[12].size);
