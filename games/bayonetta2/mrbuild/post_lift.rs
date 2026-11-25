@@ -3,6 +3,7 @@
 //!   2. Action prompt ring angle for printed-letter layouts (Finding 148)
 //!   3. Frame rate above 60 fps up to 120 fps (Findings 107, 113, 114, 129, 134, 136, 139, 144)
 //!   4. Wide screens 21:9 / 32:9 (Hor+ width, post-effect buffers, centered 2D projection)
+//!   5. Menu confirm/cancel swap for hardcoded Yes/No dialogs (Muspelheim & Gates of Hell teleporters, Chapter 1 telephone)
 //!
 //! All runtime helper bodies live in games/bayonetta2/runtime/game_shim_eh.c (compiled once with
 //! system headers into game_shim_eh.o); this module only inserts one-line calls into the lifted
@@ -844,6 +845,21 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
         nuw += 1;
     }
 
+    // ---- 5. Menu confirm/cancel swap for hardcoded dialogs (swap_confirm) ----
+    let mut nswap = 0usize;
+    for &(fn_hex, lab, bit, cmp_op, mask_addr) in SWAP_CONFIRM_SITES {
+        let fname = file_of(fn_hex)?;
+        load_file(&fname, &mut modified)?;
+        let ls = modified.get_mut(&fname).unwrap();
+        let (lo, hi) = func_range(ls, fn_hex)?;
+        let pfx = format!("L_{}:", lab);
+        let i = (lo..hi)
+            .find(|&k| ls[k].starts_with(&pfx))
+            .ok_or_else(|| format!("post_lift: swap_confirm site L_{} not found in f_{} ({})", lab, fn_hex, fname))?;
+        ls[i] = patch_swap_confirm_line(lab, bit, cmp_op, mask_addr, &ls[i])?;
+        nswap += 1;
+    }
+
     // Write modified c_*.c files
     for (fname, lines) in &modified {
         let out = lines.join("\n");
@@ -859,15 +875,49 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
     }
 
     log(format!(
-        "bayonetta2 post_lift: {} files patched (event_fix 3 hooks, prompt_fix 5 stores, fps: {} counters + {} reloads in {} files + {} smoothings + clock/present/cine/slowmo, ultrawide {} sites)",
+        "bayonetta2 post_lift: {} files patched (event_fix 3 hooks, prompt_fix 5 stores, fps: {} counters + {} reloads in {} files + {} smoothings + clock/present/cine/slowmo, ultrawide {} sites, swap_confirm {} sites)",
         modified.len(),
         nticks,
         nrl,
         rl_files,
         nsmooth,
         nuw,
+        nswap,
     ));
     Ok(())
+}
+
+/// Hardcoded Pro A (bit 4) / Pro B (bit 5) checks in UI dialogs that bypassed
+/// Bayonetta 2's global confirm/cancel bitmasks (0x71018e4810 / 0x71018e4814):
+///   - f_71007c649c: Muspelheim & Gates of Hell teleporter Yes/No dialog
+///   - f_7100b7a29c: Chapter 1 Gates of Hell telephone Yes/No dialog
+///   - f_7100b7a624: Chapter 1 Gates of Hell telephone notice dialog
+const SWAP_CONFIRM_SITES: &[(&str, &str, u32, &str, u64)] = &[
+    ("71007c649c", "71007c65a0", 5, "!=", 0x71018e4814), // portal dialog cancel
+    ("71007c649c", "71007c65f8", 4, "==", 0x71018e4810), // portal dialog confirm
+    ("7100b7a29c", "7100b7a46c", 5, "!=", 0x71018e4814), // telephone dialog cancel
+    ("7100b7a29c", "7100b7a4d0", 4, "==", 0x71018e4810), // telephone dialog confirm
+    ("7100b7a624", "7100b7a768", 4, "==", 0x71018e4810), // telephone notice confirm
+];
+
+fn patch_swap_confirm_line(
+    lab: &str,
+    bit: u32,
+    cmp_op: &str,
+    mask_addr: u64,
+    old: &str,
+) -> Result<String, String> {
+    let orig_pfx = format!("L_{}: if (((c->x[8] >> {}) & 1) {} 0) ", lab, bit, cmp_op);
+    let patched_pfx = format!("L_{}: if (((uint32_t)c->x[8] & rd32(0x{:x}ULL)) {} 0) ", lab, mask_addr, cmp_op);
+    let rest = old
+        .strip_prefix(&orig_pfx)
+        .or_else(|| old.strip_prefix(&patched_pfx))
+        .ok_or_else(|| format!("post_lift: unexpected swap_confirm line at L_{}: {}", lab, old))?;
+    let goto_stmt = rest.strip_suffix("   /* [swap_confirm] */").unwrap_or(rest);
+    if !goto_stmt.starts_with("goto L_") || !goto_stmt.ends_with(';') {
+        return Err(format!("post_lift: unexpected swap_confirm branch at L_{}: {}", lab, old));
+    }
+    Ok(format!("{}{}   /* [swap_confirm] */", patched_pfx, goto_stmt))
 }
 
 const UW_WIDTH_LAB: &str = "7100dc1e40";
@@ -957,5 +1007,87 @@ mod tests {
         assert!(patch_uw_line(UW_WIDTH_LAB, "L_7100dc1e40: c->x[8] = 0;").is_err());
         assert!(patch_uw_line(UW_CENTRE_LAB, "L_710097985c: c->v[0] = c->v[1];").is_err());
         assert!(patch_uw_line("710097b9fc", "L_710097b9fc: ;").is_err());
+    }
+
+    #[test]
+    fn swap_confirm_patch_all_5_sites_and_idempotent() {
+        let cases = [
+            (
+                "71007c65a0",
+                5,
+                "!=",
+                0x71018e4814u64,
+                "L_71007c65a0: if (((c->x[8] >> 5) & 1) != 0) goto L_71007c65d4;",
+                "L_71007c65a0: if (((uint32_t)c->x[8] & rd32(0x71018e4814ULL)) != 0) goto L_71007c65d4;   /* [swap_confirm] */",
+            ),
+            (
+                "71007c65f8",
+                4,
+                "==",
+                0x71018e4810u64,
+                "L_71007c65f8: if (((c->x[8] >> 4) & 1) == 0) goto L_71007c6678;",
+                "L_71007c65f8: if (((uint32_t)c->x[8] & rd32(0x71018e4810ULL)) == 0) goto L_71007c6678;   /* [swap_confirm] */",
+            ),
+            (
+                "7100b7a46c",
+                5,
+                "!=",
+                0x71018e4814u64,
+                "L_7100b7a46c: if (((c->x[8] >> 5) & 1) != 0) goto L_7100b7a4ac;",
+                "L_7100b7a46c: if (((uint32_t)c->x[8] & rd32(0x71018e4814ULL)) != 0) goto L_7100b7a4ac;   /* [swap_confirm] */",
+            ),
+            (
+                "7100b7a4d0",
+                4,
+                "==",
+                0x71018e4810u64,
+                "L_7100b7a4d0: if (((c->x[8] >> 4) & 1) == 0) goto L_7100b7a5ac;",
+                "L_7100b7a4d0: if (((uint32_t)c->x[8] & rd32(0x71018e4810ULL)) == 0) goto L_7100b7a5ac;   /* [swap_confirm] */",
+            ),
+            (
+                "7100b7a768",
+                4,
+                "==",
+                0x71018e4810u64,
+                "L_7100b7a768: if (((c->x[8] >> 4) & 1) == 0) goto L_7100b7aa04;",
+                "L_7100b7a768: if (((uint32_t)c->x[8] & rd32(0x71018e4810ULL)) == 0) goto L_7100b7aa04;   /* [swap_confirm] */",
+            ),
+        ];
+        assert_eq!(cases.len(), SWAP_CONFIRM_SITES.len());
+        for (idx, (lab, bit, cmp_op, mask_addr, input, expected)) in cases.iter().enumerate() {
+            let (_, s_lab, s_bit, s_cmp, s_mask) = SWAP_CONFIRM_SITES[idx];
+            assert_eq!((s_lab, s_bit, s_cmp, s_mask), (*lab, *bit, *cmp_op, *mask_addr));
+            let out = patch_swap_confirm_line(lab, *bit, cmp_op, *mask_addr, input).unwrap();
+            assert_eq!(out, *expected);
+            assert_eq!(patch_swap_confirm_line(lab, *bit, cmp_op, *mask_addr, &out).unwrap(), out);
+        }
+    }
+
+    #[test]
+    fn swap_confirm_patch_rejects_unexpected_lines() {
+        assert!(patch_swap_confirm_line(
+            "71007c65a0",
+            5,
+            "!=",
+            0x71018e4814,
+            "L_71007c65a0: if (((c->x[8] >> 4) & 1) != 0) goto L_71007c65d4;"
+        )
+        .is_err());
+        assert!(patch_swap_confirm_line(
+            "71007c65f8",
+            4,
+            "==",
+            0x71018e4810,
+            "L_71007c65f8: if (((c->x[8] >> 4) & 1) != 0) goto L_71007c6678;"
+        )
+        .is_err());
+        assert!(patch_swap_confirm_line(
+            "7100b7a768",
+            4,
+            "==",
+            0x71018e4810,
+            "L_7100b7a768: if (((c->x[8] >> 4) & 1) == 0) return;"
+        )
+        .is_err());
     }
 }

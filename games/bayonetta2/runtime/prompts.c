@@ -738,7 +738,11 @@ static void prompts_sync_ring(int want_letter) {
  *   [0] id=0  Confirm (default 0x1760995e = crc32("btn_002") & 0x7fffffff = A)
  *   [1] id=1  Cancel  (default 0x0e69c8e4 = crc32("btn_001") & 0x7fffffff = B)
  *   [2] id=2  B       (0x0e69c8e4 = btn_001, gameplay/explicit B - left untouched)
- *   [3] id=3  A       (0x1760995e = btn_002, gameplay/explicit A - left untouched) */
+ *   [3] id=3  A       (0x1760995e = btn_002, gameplay/explicit A - left untouched)
+ *
+ * A few in-game Yes/No & notice dialogs (f_71007c649c for Muspelheim / Gates of Hell teleporters,
+ * f_7100b7a29c & f_7100b7a624 for the Chapter 1 telephone) hardcoded Pro A/B bits instead of reading
+ * 0x71018e4810/14; games/bayonetta2/mrbuild/post_lift.rs patches those checks to use both masks. */
 #define B2_PAD_A        0x10u
 #define B2_PAD_B        0x20u
 #define B2_PIC_A        0x1760995eu   /* crc32("btn_002") & 0x7fffffff */
