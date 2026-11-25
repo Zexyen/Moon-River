@@ -592,19 +592,11 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
     let mut fn_to_file: HashMap<String, String> = HashMap::new();
     let mut uw_label_to_file: HashMap<String, String> = HashMap::new();
 
-    const UW_WIDTH: &str = "7100dc1e40";
-    const UW_BUFFERS: &[&str] = &["710097b9fc", "710097ba0c", "710097cba0", "710097d29c", "7100ed19d8"];
-    const UW_HALF: &[&str] = &["710097cbe8", "710097d2d0", "710097d2fc", "710097d328"];
-    const UW_QUARTER: &[&str] = &[
-        "710097d354", "710097d380", "710097d3a8", "710097d3d0", "710097d3f8",
-        "710097d420", "710097d448", "710097d498", "710097d4c0",
-    ];
-    const UW_CENTRE: &str = "710097985c";
-    let uw_set: HashSet<&str> = std::iter::once(UW_WIDTH)
-        .chain(UW_BUFFERS.iter().copied())
-        .chain(UW_HALF.iter().copied())
-        .chain(UW_QUARTER.iter().copied())
-        .chain(std::iter::once(UW_CENTRE))
+    let uw_set: HashSet<&str> = std::iter::once(UW_WIDTH_LAB)
+        .chain(UW_BUFFERS_LABS.iter().copied())
+        .chain(UW_HALF_LABS.iter().copied())
+        .chain(UW_QUARTER_LABS.iter().copied())
+        .chain(std::iter::once(UW_CENTRE_LAB))
         .collect();
 
     let mut nrl = 0usize;
@@ -829,8 +821,14 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
     }
 
     // ---- 4. Wide screens (21:9 / 32:9) ----
+    let uw_labels: Vec<&str> = std::iter::once(UW_WIDTH_LAB)
+        .chain(UW_BUFFERS_LABS.iter().copied())
+        .chain(UW_HALF_LABS.iter().copied())
+        .chain(UW_QUARTER_LABS.iter().copied())
+        .chain(std::iter::once(UW_CENTRE_LAB))
+        .collect();
     let mut nuw = 0usize;
-    for &lab in &uw_set {
+    for &lab in &uw_labels {
         let fname = uw_label_to_file
             .get(lab)
             .cloned()
@@ -842,29 +840,7 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
             .iter()
             .position(|l| l.starts_with(&pfx))
             .ok_or_else(|| format!("post_lift: L_{} vanished from {}", lab, fname))?;
-        let old = ls[i].clone();
-        ls[i] = if lab == UW_WIDTH {
-            format!(
-                "L_{}: {{  uint64_t a = c->x[20] + 0ULL; c->x[8] = (uint64_t)(rd32(a));  }} if (recomps_uw_width()) c->x[8] = recomps_uw_width();   /* [uw_patch] */",
-                lab
-            )
-        } else if lab == UW_CENTRE {
-            format!(
-                "L_{}: {{ V128 t = c->v[0];  c->v[3] = t; }} if (recomps_uw_width()) {{ float off = (c->v[1].f[0] - 1280.0f) * 0.5f; if (off > 0) {{ c->v[0].f[0] = -off; c->v[1].f[0] -= off; }} }}   /* [uw_patch] */",
-                lab
-            )
-        } else {
-            let b = body_of(&old).ok_or_else(|| format!("post_lift: bad uw line: {}", old))?;
-            let r = b.strip_prefix("c->x[").ok_or_else(|| format!("post_lift: unexpected uw line at {}: {}", lab, old))?;
-            let (reg, _) = parse_u32_prefix(r).ok_or_else(|| format!("post_lift: bad uw reg at {}", lab))?;
-            if UW_HALF.contains(&lab) {
-                format!("L_{}: c->x[{}] = (uint32_t)(recomps_uw_width() ? recomps_uw_width() / 2 : 0x280U);   /* [uw_patch] */", lab, reg)
-            } else if UW_QUARTER.contains(&lab) {
-                format!("L_{}: c->x[{}] = (uint32_t)(recomps_uw_width() ? recomps_uw_width() / 4 : 0x140U);   /* [uw_patch] */", lab, reg)
-            } else {
-                format!("L_{}: c->x[{}] = (uint32_t)(recomps_uw_width() ? recomps_uw_width() : 0x500U);   /* [uw_patch] */", lab, reg)
-            }
-        };
+        ls[i] = patch_uw_line(lab, &ls[i])?;
         nuw += 1;
     }
 
@@ -892,4 +868,94 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
         nuw,
     ));
     Ok(())
+}
+
+const UW_WIDTH_LAB: &str = "7100dc1e40";
+const UW_BUFFERS_LABS: &[&str] = &["710097b9fc", "710097ba0c", "710097cba0", "710097d29c", "7100ed19d8"];
+const UW_HALF_LABS: &[&str] = &["710097cbe8", "710097d2d0", "710097d2fc", "710097d328"];
+const UW_QUARTER_LABS: &[&str] = &[
+    "710097d354", "710097d380", "710097d3a8", "710097d3d0", "710097d3f8",
+    "710097d420", "710097d448", "710097d498", "710097d4c0",
+];
+const UW_CENTRE_LAB: &str = "710097985c";
+
+fn patch_uw_line(lab: &str, old: &str) -> Result<String, String> {
+    if lab == UW_WIDTH_LAB {
+        if !old.contains("c->x[20]") || !old.contains("rd32(a)") {
+            return Err(format!("post_lift: unexpected ultrawide width line at {}: {}", lab, old));
+        }
+        Ok(format!(
+            "L_{}: {{  uint64_t a = c->x[20] + 0ULL; c->x[8] = (uint64_t)(rd32(a));  }} if (recomps_uw_width()) c->x[8] = recomps_uw_width();   /* [uw_patch] */",
+            lab
+        ))
+    } else if lab == UW_CENTRE_LAB {
+        if !old.contains("c->v[3] = t") {
+            return Err(format!("post_lift: unexpected ultrawide centre line at {}: {}", lab, old));
+        }
+        Ok(format!(
+            "L_{}: {{ V128 t = c->v[0];  c->v[3] = t; }} if (recomps_uw_width()) {{ float off = (c->v[1].f[0] - 1280.0f) * 0.5f; if (off > 0) {{ c->v[0].f[0] = -off; c->v[1].f[0] -= off; }} }}   /* [uw_patch] */",
+            lab
+        ))
+    } else {
+        let b = body_of(old).ok_or_else(|| format!("post_lift: bad uw line: {}", old))?;
+        let r = b.strip_prefix("c->x[").ok_or_else(|| format!("post_lift: unexpected uw line at {}: {}", lab, old))?;
+        let (reg, _) = parse_u32_prefix(r).ok_or_else(|| format!("post_lift: bad uw reg at {}", lab))?;
+        if UW_HALF_LABS.contains(&lab) {
+            Ok(format!("L_{}: c->x[{}] = (uint32_t)(recomps_uw_width() ? recomps_uw_width() / 2 : 0x280U);   /* [uw_patch] */", lab, reg))
+        } else if UW_QUARTER_LABS.contains(&lab) {
+            Ok(format!("L_{}: c->x[{}] = (uint32_t)(recomps_uw_width() ? recomps_uw_width() / 4 : 0x140U);   /* [uw_patch] */", lab, reg))
+        } else if UW_BUFFERS_LABS.contains(&lab) {
+            Ok(format!("L_{}: c->x[{}] = (uint32_t)(recomps_uw_width() ? recomps_uw_width() : 0x500U);   /* [uw_patch] */", lab, reg))
+        } else {
+            Err(format!("post_lift: unknown ultrawide label {}", lab))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uw_patch_all_20_sites_and_idempotent() {
+        let width_in = "L_7100dc1e40: {  uint64_t a = c->x[20] + 0ULL; c->x[8] = (uint64_t)(rd32(a));  }";
+        let width_out = patch_uw_line(UW_WIDTH_LAB, width_in).unwrap();
+        assert!(width_out.contains("if (recomps_uw_width()) c->x[8] = recomps_uw_width();"));
+        assert_eq!(patch_uw_line(UW_WIDTH_LAB, &width_out).unwrap(), width_out);
+
+        let centre_in = "L_710097985c: { V128 t = c->v[0];  c->v[3] = t; }";
+        let centre_out = patch_uw_line(UW_CENTRE_LAB, centre_in).unwrap();
+        assert!(centre_out.contains("float off = (c->v[1].f[0] - 1280.0f) * 0.5f;"));
+        assert_eq!(patch_uw_line(UW_CENTRE_LAB, &centre_out).unwrap(), centre_out);
+
+        for &lab in UW_BUFFERS_LABS {
+            let line = format!("L_{}: c->x[9] = (uint32_t)(0x500ULL);", lab);
+            let out = patch_uw_line(lab, &line).unwrap();
+            assert!(out.contains("recomps_uw_width() ? recomps_uw_width() : 0x500U"));
+            assert_eq!(patch_uw_line(lab, &out).unwrap(), out);
+        }
+        for &lab in UW_HALF_LABS {
+            let line = format!("L_{}: c->x[10] = (uint32_t)(0x280ULL);", lab);
+            let out = patch_uw_line(lab, &line).unwrap();
+            assert!(out.contains("recomps_uw_width() ? recomps_uw_width() / 2 : 0x280U"));
+            assert_eq!(patch_uw_line(lab, &out).unwrap(), out);
+        }
+        for &lab in UW_QUARTER_LABS {
+            let line = format!("L_{}: c->x[11] = (uint32_t)(0x140ULL);", lab);
+            let out = patch_uw_line(lab, &line).unwrap();
+            assert!(out.contains("recomps_uw_width() ? recomps_uw_width() / 4 : 0x140U"));
+            assert_eq!(patch_uw_line(lab, &out).unwrap(), out);
+        }
+        assert_eq!(
+            1 + UW_BUFFERS_LABS.len() + UW_HALF_LABS.len() + UW_QUARTER_LABS.len() + 1,
+            20
+        );
+    }
+
+    #[test]
+    fn uw_patch_rejects_unexpected_lines() {
+        assert!(patch_uw_line(UW_WIDTH_LAB, "L_7100dc1e40: c->x[8] = 0;").is_err());
+        assert!(patch_uw_line(UW_CENTRE_LAB, "L_710097985c: c->v[0] = c->v[1];").is_err());
+        assert!(patch_uw_line("710097b9fc", "L_710097b9fc: ;").is_err());
+    }
 }
