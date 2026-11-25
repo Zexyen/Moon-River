@@ -66,6 +66,7 @@ static VkShaderModule module_from_glsl(int stage, const char *glsl, const char *
     VkShaderModuleCreateInfo ci = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO}; ci.codeSize = n; ci.pCode = w; VkShaderModule m; VKC(vkCreateShaderModule(V.device, &ci, NULL, &m)); free(w); return m;
 }
 static void dsh_forget(void) {}
+static void sampler_table_reset(void) {}
 static int g_nsmp_old, g_nsmp; static VkSampler g_smp_old[4]; static struct { VkSampler s; } g_smp[4];
 const GfxOptions *gfx_options(void);
 static void present_mode_pick(void) {} static void swapchain_destroy(void) {} static LONG64 g_vk_recreated; static void rs_apply(void) {}
@@ -142,8 +143,10 @@ int main(int argc, char **argv) {
     /* compare */
     long bad = 0, worst = 0; double sum = 0; uint8_t *diff = calloc((size_t)W * H, 4);
     float sc = (float)W / 1280 < (float)H / 720 ? (float)W / 1280 : (float)H / 720; if (sc < 0.45f) sc = 0.45f;      /* (scale_of) */
+    float pw = 740 * sc; if (pw > W) pw = (float)W;
+    float edge = floorf(W - pw);
     for (long i = 0; i < (long)W * H; i++) {
-        if (which == 1 && (i % W) < 360 * sc + (i / W) * 0.4040f + 1) continue;      /* left of the panel's edge the game shows: the CPU fallback's flat indigo is not compared */
+        if (which == 1 && (i % W) < edge + 1) continue;      /* left of the drawer's edge the game shows: the CPU fallback's backdrop is not compared */
         int d = 0; for (int k = 0; k < 3; k++) { int e = abs(cpu[i * 4 + k] - gpu[i * 4 + k]); if (e > d) d = e; } sum += d; if (d > worst) worst = d; if (d > 16) bad++; diff[i * 4] = diff[i * 4 + 1] = diff[i * 4 + 2] = d > 255 ? 255 : d * 4 > 255 ? 255 : d * 4;
     }
     printf("%dx%d screen %d: %d sprites; worst channel difference %ld, mean %.3f, pixels over 16: %ld of %ld (%.3f%%)\n", W, H, which, nspr, worst, sum / ((double)W * H), bad, (long)W * H, 100.0 * bad / ((double)W * H));
