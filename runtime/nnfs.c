@@ -808,6 +808,7 @@ static void fs_OpenFile(Ctx *c) {                     /* (FileHandle *out, const
         if (on) printf("fslog: open \"%s\" mode %d -> %s\n", STR(1), (int)A2, r ? "NOT FOUND" : "ok"); }
     if (r) { wr64(A0, 0); RET(r); return; }
     open_remember(h, (int)(A2 & 7), m);
+    if (m->kind == MK_SAVE && !write && !_strnicmp(rel, "save", 4) && _stricmp(rel, "savesystem.sav")) { void achievements_save_loaded(void); achievements_save_loaded(); }   /* [moonriver] Recomp Achievements */
     if (modded) prompt_swap_open(h, path);
     wr64(A0, (uint64_t)h);
     RET(0);

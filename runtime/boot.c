@@ -264,6 +264,7 @@ static DWORD WINAPI guest_main(LPVOID arg) {
     trace_printf("=== phase 3: nnMain\n");
     call_guest(&c, NN_MAIN);
     { void clib_run_atexit(Ctx *c); clib_run_atexit(&c); }   /* clib.c: functions registered with atexit, as a normal exit does */
+    { void achievements_shutdown(void); achievements_shutdown(); } /* [moonriver] Recomp Achievements */
 
     printf("\nnnMain returned.\n");
     print_import_summary(stdout);
@@ -333,6 +334,7 @@ static int mr_main(int argc, char **argv) {
     register_sdk2_imports();                 /* SDK families (lifted sdk.elf code + offline service answers): fills only; after the C runtime because its self-test needs every handler */
     { void audit_startup(void); audit_startup(); }   /* hostrt.c: fake audit / MR_STRICT (plan\FAKE_AUDIT.md) */
     display_init();
+    { void achievements_start(void); achievements_start(); } /* [moonriver] Recomp Achievements (no-op without RL_SESSION) */
     int seconds = argc > 2 ? atoi(argv[2]) : 0;      /* no number = no time limit (a player's launch); tests pass theirs */
 #ifdef __APPLE__
     /* [moonriver] macOS: this thread, the program's first, is the only one the window's events can be read on: it reads
