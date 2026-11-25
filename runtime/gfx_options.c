@@ -113,7 +113,7 @@ static const char *const k_default_ini =
 ";   (or a number, 2.37). Wider than 16:9 shows more at the sides, narrower more above and below.\r\n"
 "aspect_ratio = 16:9\r\n"
 "\r\n"
-"; hud_area = screen | 16:9      (with aspect_ratio wider than 16:9; at once)\r\n"
+"; hud_area = screen | 16:9      (with aspect = wide or aspect_ratio wider than 16:9; at once)\r\n"
 ";   screen: the HUD's corners (health, gauges, score) at the screen's edges. 16:9: kept in a 16:9 area in the middle.\r\n"
 "hud_area = screen\r\n"
 "\r\n"
@@ -277,7 +277,7 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
         else if (!_stricmp(key, "hdr_peak")) { float v = (float)atof(val); o->hdr_peak = v >= 80.0f && v <= 10000.0f ? v : 0.0f; }      /* [moonriver] auto, or a value out of range */
         else if (!_stricmp(key, "cutscene_fps")) o->cutscene_fps = atoi(val) == 60 ? 60 : 30;      /* [moonriver] */
         else if (!_stricmp(key, "bc7_textures")) o->bc7_textures = !_stricmp(val, "on");      /* #54 */
-        else if (!_stricmp(key, "hud_area")) o->hud_centre = !strcmp(val, "16:9");      /* [moonriver] */
+        else if (!_stricmp(key, "hud_area")) o->hud_centre = !_stricmp(val, "16:9");      /* [moonriver] */
         else if (!_stricmp(key, "aspect_ratio")) { float a, b; int n = sscanf(val, "%f:%f", &a, &b); o->aspect_ratio = !_stricmp(val, "auto") ? -1.0f : n == 2 && b > 0 ? a / b : n == 1 ? a : 0.0f; }      /* [moonriver] */
         else unknown++;
     }

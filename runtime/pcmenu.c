@@ -97,6 +97,8 @@ static const Row k_rows[] = {
      {"auto", "400", "600", "800", "1000", "1500", "2000", "4000"}, {"Auto", "400 nits", "600 nits", "800 nits", "1000 nits", "1500 nits", "2000 nits", "4000 nits"}},
     {"aspect", "Picture fit", "Keep shape: 16:9 with bars. Stretch: fills window. Wide: native 21:9 / 32:9 ultrawide (applies at next start).", NULL, "keep", A_LIVE, 0,
      {"keep", "stretch", "wide"}, {"Keep shape", "Stretch", "Wide"}},
+    {"hud_area", "HUD area", "Ultrawide only. Centered (16:9): keeps HUD in the middle 16:9 area. Full screen: moves corner HUD elements to the ultrawide edges.", NULL, "screen", A_LIVE, 0,
+     {"16:9", "screen"}, {"Centered (16:9)", "Full screen"}},
     {"button_prompts", "Button prompts", "Which buttons the game shows. Auto follows what you use, pad, keyboard or mouse. The others always show that set.", NULL, "auto", A_PROMPTS, 0,
      {"auto", "playstation", "xbox", "switch", "keyboard"}, {"Auto", "PlayStation", "Xbox", "Switch", "Keyboard"}},
     {"swap_confirm", "Swap Confirm", "Menus confirm with B and go back with A, and show it. Gameplay and the keyboard stay the same. This panel follows when it next opens.", NULL, "off", A_MENU_SWAP, 0,

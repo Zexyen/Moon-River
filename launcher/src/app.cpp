@@ -117,6 +117,7 @@ const std::vector<SettingDef>& setting_defs()
 		{"hdr_peak", "HDR peak", "Your monitor's peak brightness, for the scene's lights.",
 			{{"auto", "Auto"}, {"400", "400 nits"}, {"600", "600 nits"}, {"800", "800 nits"}, {"1000", "1000 nits"}, {"1500", "1500 nits"}, {"2000", "2000 nits"}, {"4000", "4000 nits"}}, 1},
 		{"aspect", "Aspect ratio", "Keep 16:9, stretch, or native Wide (21:9 / 32:9).", {{"keep", "Fixed 16:9"}, {"stretch", "Stretch"}, {"wide", "Wide"}}, 1},
+		{"hud_area", "HUD area", "Ultrawide only: keep the HUD centered in 16:9 or span the full wide screen.", {{"16:9", "Centered (16:9)"}, {"screen", "Full screen"}}, 1, "screen"},
 		{"button_prompts", "Button prompts", "Auto follows the controller or keyboard you use.",
 			{{"auto", "Auto"}, {"playstation", "PlayStation"}, {"xbox", "Xbox"}, {"switch", "Switch"}, {"keyboard", "Keyboard"}}, 2, nullptr, "/controllers.ini", "general"},
 		{"swap_confirm", "Swap confirm", "Menus only: B confirms, A goes back.", {{"off", "Off"}, {"on", "On"}}, 2, nullptr, "/controllers.ini", "general"},
