@@ -4204,8 +4204,78 @@ static void fsr_mv_commit(int indexed, VkBuffer ib, VkDeviceSize iboff, VkIndexT
  * landing of such a buffer in the next frame (the game wrote into its range: B3's light lists, two of 130 KB a frame in
  * Shibuya) waited for the whole previous frame on the GPU. The draw is in the command buffer being recorded once its
  * preparation has ended (nothing between that and the draw call submits): that one is named. */
+static int uw_log_on(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("WT_UW_LOG");
+        if (!e) e = getenv("SSBU_UW_LOG");
+        on = e && atoi(e);
+    }
+    return on;
+}
+static void uw_tmp_path(char *out, size_t n, const char *name) {
+#ifdef _WIN32
+    const char *t = getenv("TEMP");
+    snprintf(out, n, "%s\\%s", t && t[0] ? t : ".", name);
+#else
+    snprintf(out, n, "/tmp/%s", name);
+#endif
+}
+static void uw_log_target(void) {               /* WT_UW_LOG=1: each new render-area size (viewport, scissor, target), once */
+    static char seen[512][96]; static int ns; char k[96];
+    snprintf(k, sizeof k, "vp %g,%g,%g,%g sc %d,%d,%d,%d(%d) pass %dx%d", R.viewport[0], R.viewport[1], R.viewport[2], R.viewport[3], R.scissor[0], R.scissor[1], R.scissor[2], R.scissor[3], R.have_scissor, R.pass_w, R.pass_h);
+    for (int i = 0; i < ns; i++) if (!strcmp(seen[i], k)) return;
+    if (ns < 512) { strcpy(seen[ns++], k); printf("UWVP f%lld vs#%d fs#%d %s\n", nvn_front_frame_next(), R.prog[0] ? R.prog[0]->serial : -1, R.prog[1] ? R.prog[1]->serial : -1, k); }
+}
+/* WT_UW_LOG=1 / SSBU_UW_LOG=1 developer aid: press F10 or create /tmp/uw_capture while an effect is on screen; the next
+ * frame's draws are logged one line each (UWCAP), a screenshot is saved, then the capture marker file is removed. */
+volatile int g_uw_cap_shot;
+static int uw_cap_now(void) {
+    static long long lf = -1; static int on;
+    long long f = nvn_front_frame_next();
+    if (f != lf) {
+        char p[260]; uw_tmp_path(p, sizeof p, "uw_capture");
+        lf = f;
+        if (on) { on = 0; remove(p); printf("UWCAP end\n"); }
+        else { FILE *fp = fopen(p, "r"); if (fp) { fclose(fp); on = 1; g_uw_cap_shot = 1; printf("UWCAP begin frame %lld\n", f); } }
+    }
+    return on;
+}
+static void uw_cap_draw(void) {
+    printf("UWCAP vs#%d fs#%d na%d attrs", R.prog[0] ? R.prog[0]->serial : -1, R.prog[1] ? R.prog[1]->serial : -1, R.nattr);
+    for (int i = 0; i < R.nattr && i < 16; i++) if (R.vattr[i] & 0xff) printf(" %d:%x+%u", i, R.vattr[i] & 0xff, R.vattr[i] >> 14 & 0xffff);
+    printf(" stride %u vp %g,%g,%g,%g sc %d,%d,%d,%d(%d) tgt %d", R.vstream[0].stride, R.viewport[0], R.viewport[1], R.viewport[2], R.viewport[3], R.scissor[0], R.scissor[1], R.scissor[2], R.scissor[3], R.have_scissor, R.ncol && R.col[0].tex ? (int)R.col[0].tex->b.width : 0);
+    if (R.vbuf[0].addr && R.vbuf[0].size >= 16) { const float *v = P(R.vbuf[0].addr); printf(" v0 %g,%g,%g,%g", v[0], v[1], v[2], v[3]); }
+    for (int n = 0; n < 16; n++) if (R.ubo[0][n].addr && R.ubo[0][n].size >= 32) { const float *q = P(R.ubo[0][n].addr); printf(" | u%d %g %g %g %g %g %g %g %g", n, q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]); if (n == 4 && R.ubo[0][n].size >= 128) printf(" [16] %g %g %g %g %g %g %g %g", q[16], q[17], q[18], q[19], q[20], q[21], q[22], q[23]); }
+    for (int n = 0; n < 16; n++) if (R.prog[1] && R.ubo[1][n].addr && R.ubo[1][n].size >= 32) { const float *q = P(R.ubo[1][n].addr); printf(" | f%d", n); for (int i = 0; i < 16 && i * 4 < (int)R.ubo[1][n].size; i++) printf(" %g", q[i]); }
+    printf("\n");
+}
+/* WT_UW_LOG=1 live controls, read every 30 frames: uw_skip holds vertex-shader serials (negative = fragment-shader serial)
+ * whose draws are skipped; uw_dump holds one vertex-shader serial whose draws print all UBO blocks in full (UWDUMP). */
+static int g_uw_skip[16], g_uw_nskip, g_uw_dumpvs = -1;
+static void uw_live(void) {
+    static long long lf = -100; long long f = nvn_front_frame_next();
+    if (f - lf < 30 && f >= lf) return;
+    lf = f; g_uw_nskip = 0; g_uw_dumpvs = -1;
+    char p[260];
+    uw_tmp_path(p, sizeof p, "uw_skip");
+    FILE *fp = fopen(p, "r"); if (fp) { while (g_uw_nskip < 16 && fscanf(fp, "%d", &g_uw_skip[g_uw_nskip]) == 1) g_uw_nskip++; fclose(fp); }
+    uw_tmp_path(p, sizeof p, "uw_dump");
+    fp = fopen(p, "r"); if (fp) { if (fscanf(fp, "%d", &g_uw_dumpvs) != 1) g_uw_dumpvs = -1; fclose(fp); }
+}
+static int g_uw_von;                               /* 1: R.vbuf[0] is g_uw_vtx, holding the draw's vertices from g_uw_vlo on */
 static CB *g_dw_cb[32]; static int g_dw_n;
 static int draw_prepare(unsigned prim) {
+    if (uw_log_on()) {
+        uw_log_target(); if (uw_cap_now()) uw_cap_draw();
+        uw_live();
+        if (R.prog[0]) for (int i = 0; i < g_uw_nskip; i++) if (R.prog[0]->serial == g_uw_skip[i] || (R.prog[1] && -R.prog[1]->serial == g_uw_skip[i])) return 0;   /* negative: fragment-shader serial */
+        if (R.prog[0] && R.prog[0]->serial == g_uw_dumpvs) { static int n; if (n++ < 5 || uw_cap_now()) {
+            printf("UWDUMP f%lld vs#%d fs#%d", nvn_front_frame_next(), R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1);
+            for (int b = 0; b < 16; b++) if (R.ubo[0][b].addr && R.ubo[0][b].size) { const float *q = P(R.ubo[0][b].addr); int nf = (int)(R.ubo[0][b].size / 4); if (nf > 32) nf = 32; printf(" | u%d", b); for (int i = 0; i < nf; i++) printf(" %g", q[i]); }
+            for (int b = 0; b < 16; b++) if (R.prog[1] && R.ubo[1][b].addr && R.ubo[1][b].size) { const float *q = P(R.ubo[1][b].addr); int nf = (int)(R.ubo[1][b].size / 4); if (nf > 32) nf = 32; printf(" | f%d", b); for (int i = 0; i < nf; i++) printf(" %g", q[i]); }
+            printf("\n"); } }
+    }
     g_dw_n = 0;
     g_dp_fs_stores = 0;
     if (g_ptm_on < 0) g_ptm_on = getenv("WT_VK_PREPTIME") && atoi(getenv("WT_VK_PREPTIME"));
@@ -4337,7 +4407,7 @@ static int draw_prepare(unsigned prim) {
         if (!R.vbuf[i].addr || !R.vbuf[i].size) continue;
         BufRef b;
         VRes *vk = NULL;
-        if (vrc && !vrc_cb_touch(R.vbuf[i].addr, R.vbuf[i].size)) vk = vrc_ref(R.vbuf[i].addr, R.vbuf[i].size, &b);
+        if (vrc && !(i == 0 && g_uw_von) && !vrc_cb_touch(R.vbuf[i].addr, R.vbuf[i].size)) vk = vrc_ref(R.vbuf[i].addr, R.vbuf[i].size, &b);
         else from_cb |= buf_ref(R.vbuf[i].addr, R.vbuf[i].size, 1, &b);
         voff[i] = b.off; vbufs[i] = b.buf; vkept[i] = vk;
         if (vk) vkept_mask |= 1u << i;
@@ -5001,21 +5071,28 @@ static void rs_store_done(int drawn) {             /* the targets of the game's 
     g_oq_on = g_sf_oq;
     g_sf_draws += drawn;
 }
-/* 21:9 / 32:9 (Bayonetta 2, B2recomp-ww): the game lays its 2D out 1280 wide; its 2D projection (vertex uniform block 12,
+/* 21:9 / 32:9 (Bayonetta 2, B2recomp PR #56): the game lays its 2D out 1280 wide; its 2D projection (vertex uniform block 12,
  * patched in post_lift) centres that layout on a wider screen. Per 2D / effect draw (fast-pathed out when g_rs_bw <= 1280),
  * full-screen pieces stretch to the wide edges while HUD/menu elements stay centred and clipped to the 16:9 area. */
-static float g_uw_proj[6][64];
+static float g_uw_proj[6][64];                    /* 0 screen, 1 layout stretched, 2 right-edge panel, 3 hung from right edge, 4 w-based counter, 5 left-edge panel */
 static Range g_uw_keep;
 static int g_uw_sc, g_uw_sc_had, g_uw_sc_keep[4];
 static float g_uw_vtx[64 * 12];
 static Range g_uw_vkeep;
-static int g_uw_von;
 static int64_t g_uw_vlo;
-static int g_uw_on;
-static uint8_t g_uw_fx[4096][256];
+static int g_uw_on;                               /* 0 nothing swapped, else 1 + the uniform block index swapped */
+static uint8_t g_uw_fx[4096][256];                /* effect blocks: fresh address per draw (ring_put caches by address within a batch) */
 static unsigned g_uw_fxn;
-static float g_uw_bars;
+static float g_uw_bars;                           /* screen width of a movie draw just prepared: its sides are cleared black */
 
+/* Update a host-side scratch buffer that buf_ref streams into R.ring: invalidate R.acache whenever its bytes change so
+ * a later draw in the same batch never reuses an earlier draw's cached ring offset. */
+static void uw_write_cached(void *dst, const void *src, size_t n) {
+    if (memcmp(dst, src, n) != 0) {
+        memcpy(dst, src, n);
+        ring_inval_range((uint64_t)(uintptr_t)dst, (uint64_t)n);
+    }
+}
 static int uw_centred_x(const float *m) {
     float W = m[0] > 1.0f ? 2560.0f / m[0] : 0;
     if (W < 1281.0f || W > 8192.0f || fabsf(m[3] * W - 1280.0f) > 1.0f || m[1] != 0 || fabsf(m[5] - 2.0f) > 1e-4f || fabsf(m[7] - 1.0f) > 1e-4f ||
@@ -5025,35 +5102,49 @@ static int uw_centred_x(const float *m) {
 static int uw_vrange(const Cmd *m, int indexed, uint64_t *lo, uint64_t *hi) {
     const uint64_t *a = m->a;
     if (!indexed) { *lo = a[1]; *hi = a[1] + a[2]; return *hi > *lo; }
+    int count = (int)a[2];
+    if (count <= 0) return 0;
     unsigned t = (unsigned)a[1] < 3 ? (unsigned)a[1] : 1;
     const uint8_t *ip = P(a[3]);
-    uint32_t mn = ~0u, mx = 0;
+    uint32_t mn = ~0u, mx = 0, rst = t == 0 ? 0xffu : t == 1 ? 0xffffu : 0xffffffffu;
     if (!ip) return 0;
-    for (int i = 0; i < (int)a[2]; i++) {
+    for (int i = 0; i < count; i++) {
         uint32_t v = t == 0 ? ip[i] : t == 1 ? ((const uint16_t *)ip)[i] : ((const uint32_t *)ip)[i];
+        if (R.restart && v == rst) continue;
         if (v < mn) mn = v;
         if (v > mx) mx = v;
     }
     if (mn > mx) return 0;
-    *lo = (uint64_t)((int64_t)mn + (int32_t)a[4]);
-    *hi = (uint64_t)((int64_t)mx + (int32_t)a[4]) + 1;
+    int64_t lo_s = (int64_t)mn + (int32_t)a[4], hi_s = (int64_t)mx + (int32_t)a[4] + 1;
+    if (lo_s < 0 || hi_s <= lo_s) return 0;
+    *lo = (uint64_t)lo_s;
+    *hi = (uint64_t)hi_s;
     return 1;
 }
 static int uw_fx_begin(const Cmd *m, int indexed) {
-    {
+    {   /* the screen-copy pass (Panther Within's zoom blur): unit quad, float3 at stride 12, its 4x4 in block 8 */
         const Range *b = &R.ubo[0][8];
-        if (b->size >= 64 && b->size <= sizeof g_uw_fx[0] && R.vstream[0].stride == 12 && (R.vattr[0] & 0xff) == 0x22 && uw_centred_x(P(b->addr))) {
+        if (b->addr && b->size >= 64 && b->size <= sizeof g_uw_fx[0] && R.vstream[0].stride == 12 && (R.vattr[0] & 0xff) == 0x22 && uw_centred_x(P(b->addr))) {
+            uint8_t tmp[256];
+            memcpy(tmp, P(b->addr), (size_t)b->size);
+            ((float *)tmp)[0] = 2.0f; ((float *)tmp)[3] = 1.0f;
             uint8_t *p = g_uw_fx[g_uw_fxn++ & 4095];
-            memcpy(p, P(b->addr), (size_t)b->size);
-            ((float *)p)[0] = 2.0f; ((float *)p)[3] = 1.0f;
+            uw_write_cached(p, tmp, (size_t)b->size);
             g_uw_keep = *b; g_uw_on = 1 + 8;
             R.ubo[0][8].addr = (uint64_t)(uintptr_t)p;
+            if (uw_log_on()) { static int n; if (n++ < 20) printf("UWFX8 f%lld vs#%d fs#%d made full screen\n", nvn_front_frame_next(), R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1); }
             return 1;
         }
     }
     const Range *u = &R.ubo[0][4];
-    if (u->size < 128 || u->size > sizeof g_uw_fx[0]) return 0;
+    if (!u->addr || u->size < 128 || u->size > sizeof g_uw_fx[0]) return 0;
     const float *q = P(u->addr);
+    if (uw_log_on() && R.vstream[0].stride == 32 && (R.vattr[0] & 0xff) == 0x2e && R.vbuf[0].addr) {   /* WT_UW_LOG=1: each new effect-quad matrix, once */
+        static char seen[4096][160]; static int ns; char kk[160]; const float *v = P(R.vbuf[0].addr);
+        snprintf(kk, sizeof kk, "vs#%d fs#%d v0 %.2f,%.2f M %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f | w %.2f %.2f %.2f %.2f col %.2f %.2f %.2f vp %g,%g", R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1, v[0], v[1], q[16], q[17], q[18], q[19], q[20], q[21], q[22], q[23], q[28], q[29], q[30], q[31], q[0], q[1], q[2], R.viewport[0], R.viewport[2]);
+        int f = 0; for (int i = 0; i < ns; i++) if (!strcmp(seen[i], kk)) { f = 1; break; }
+        if (!f && ns < 4096 && q[28] == 0 && q[29] == 0 && q[31] == 1.0f) { strcpy(seen[ns++], kk); printf("UWFX f%lld %s\n", nvn_front_frame_next(), kk); }
+    }
     float W = (float)g_rs_bw;
     if (q[16] == 0 || q[21] == 0 || W < 1281.0f || fabsf(q[17]) > 1e-4f || fabsf(q[20]) > 1e-4f || q[28] != 0 || q[29] != 0 || q[30] != 0 || q[31] != 1.0f) return 0;
     if (R.vstream[0].stride != 32 || (R.vattr[0] & 0xff) != 0x2e || (R.vattr[5] & 0xff) != 0x2e || !R.vbuf[0].addr) return 0;
@@ -5066,11 +5157,14 @@ static int uw_fx_begin(const Cmd *m, int indexed) {
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
     }
     float span = (x1 - x0) * W / 2560.0f;
+    if (uw_log_on() && y0 <= -0.98f && y1 >= 0.98f) { static int n; if (n++ < 40) printf("UWFXQ f%lld vs#%d fs#%d x %.3f..%.3f y %.3f..%.3f span %.3f\n", nvn_front_frame_next(), R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1, x0, x1, y0, y1, span); }
     if (y0 > -0.98f || y1 < 0.98f || fabsf(x0 + x1) > 0.06f || span < 0.85f || span > 1.3f) return 0;
     if (q[0] == 1.0f && q[1] == 1.0f && q[2] == 1.0f && fabsf(q[21] - 2.0f) < 1e-4f && fabsf(q[19] * W - 1280.0f) < 1.0f) { g_uw_bars = W; return 0; }
+    uint8_t tmp[256];
+    memcpy(tmp, q, (size_t)u->size);
+    ((float *)tmp)[16] *= W / 1280.0f; ((float *)tmp)[19] *= W / 1280.0f;
     uint8_t *p = g_uw_fx[g_uw_fxn++ & 4095];
-    memcpy(p, q, (size_t)u->size);
-    ((float *)p)[16] *= W / 1280.0f; ((float *)p)[19] *= W / 1280.0f;
+    uw_write_cached(p, tmp, (size_t)u->size);
     g_uw_keep = *u; g_uw_on = 1 + 4;
     R.ubo[0][4].addr = (uint64_t)(uintptr_t)p;
     return 1;
@@ -5083,7 +5177,7 @@ static void uw2d_begin(const Cmd *m, int indexed) {
     if (!UW_F4(0, 0) || !UW_F4(5, 16) || !UW_F4(8, 32) || R.vstream[0].stride != 48) return;
 #undef UW_F4
     const Range *u = R.ubo[0];
-    if (u[12].size < 32 || u[12].size > sizeof g_uw_proj[0] || u[13].size < 32 || !R.vbuf[0].addr) return;
+    if (!u[12].addr || !u[13].addr || u[12].size < 32 || u[12].size > sizeof g_uw_proj[0] || u[13].size < 32 || !R.vbuf[0].addr) return;
     const float *o = P(u[12].addr), *w = P(u[13].addr);
     float W = o[0] > 0 ? 2.0f / o[0] : 0;
     if (W < 1281.0f || fabsf(o[3] * W + 1280.0f) > 0.5f) return;
@@ -5096,12 +5190,19 @@ static void uw2d_begin(const Cmd *m, int indexed) {
         float x = w[0] * v[0] + w[1] * v[1] + w[2] * v[2] + w[3], y = w[4] * v[0] + w[5] * v[1] + w[6] * v[2] + w[7];
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
     }
+    if (uw_log_on()) {   /* WT_UW_LOG=1: each new kind of wide or off-layout 2D piece, once */
+        static char seen[4096][128]; static int ns; char kk[128]; float u0 = 1e30f, u1 = -1e30f, v0 = 1e30f, v1 = -1e30f;
+        for (uint64_t i = lo; i < hi; i++) { const float *t = (const float *)((const uint8_t *)P(R.vbuf[0].addr) + i * 48 + 16); if (t[0] < u0) u0 = t[0]; if (t[0] > u1) u1 = t[0]; if (t[1] < v0) v0 = t[1]; if (t[1] > v1) v1 = t[1]; }
+        snprintf(kk, sizeof kk, "vs#%d fs#%d x %.0f..%.0f y %.0f..%.0f uv %.3f..%.3f %.3f..%.3f vp %g,%g pass %dx%d", R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1, x0, x1, y0, y1, u0, u1, v0, v1, R.viewport[0], R.viewport[2], R.pass_w, R.pass_h);
+        int f = 0; for (int i = 0; i < ns; i++) if (!strcmp(seen[i], kk)) { f = 1; break; }
+        if (!f && ns < 4096 && (x1 - x0 > 900 || x0 > 1279.0f || x1 < 1.0f || fabsf(R.viewport[2] - W) > 0.5f)) { strcpy(seen[ns++], kk); printf("UW2D f%lld %s\n", nvn_front_frame_next(), kk); }
+    }
     int k;
     int onscreen = fabsf(R.viewport[2] - W) <= 0.5f && !(R.ncol && R.col[0].tex && fabsf((float)R.col[0].tex->b.width - W) > 0.5f);
     if (!onscreen) k = 1;
     else if (x1 - x0 > 1150.0f && x1 - x0 < 1400.0f && fabsf(x0 + x1 - 1280.0f) < 40.0f) k = 1;
     else if (x0 < 1.0f && x1 > W - 1.0f && y0 < 1.0f && y1 > 719.0f) k = 0;
-    else if ((fabsf(w[3] - 1280.0f) < 0.5f && x1 > 1279.0f && x1 < 1281.0f && x0 > 320.0f) || (x1 > 1300.0f && x0 > 320.0f && x0 < 1260.0f)) k = 2;
+    else if ((fabsf(w[3] - 1280.0f) < 0.5f && x1 > 1279.0f && x1 < 1281.0f && x0 > 320.0f && 1280.0f - x0 > 1.0f) || (x1 > 1300.0f && x0 > 320.0f && x0 < 1260.0f)) k = 2;
     else if (x0 < -20.0f && x1 > 20.0f && x1 < 960.0f) k = 5;
     else if (w[3] > 1280.5f && w[3] < 1280.0f + (W - 1280.0f) * 0.25f) k = 3;
     else {
@@ -5110,11 +5211,12 @@ static void uw2d_begin(const Cmd *m, int indexed) {
         if (R.have_scissor && !(sx <= 0 && sx + sw >= (int)W)) sx += l;
         else if (x0 >= 0 && x1 <= 1280.0f && !wbased) return;
         if (wbased) {
-            float *p = g_uw_proj[4];
-            memcpy(p, o, (size_t)u[12].size);
-            p[0] = 2.0f / W; p[1] = p[2] = 0; p[3] = -1.0f - (W - 1280.0f) / W;
+            float tmp[64];
+            memcpy(tmp, o, (size_t)u[12].size);
+            tmp[0] = 2.0f / W; tmp[1] = tmp[2] = 0; tmp[3] = -1.0f - (W - 1280.0f) / W;
+            uw_write_cached(g_uw_proj[4], tmp, (size_t)u[12].size);
             g_uw_keep = R.ubo[0][12]; g_uw_on = 1 + 12;
-            R.ubo[0][12].addr = (uint64_t)(uintptr_t)p;
+            R.ubo[0][12].addr = (uint64_t)(uintptr_t)g_uw_proj[4];
         }
         int a0 = sx > l ? sx : l, a1 = sx + sw < l + 1280 ? sx + sw : l + 1280;
         memcpy(g_uw_sc_keep, R.scissor, sizeof g_uw_sc_keep); g_uw_sc_had = R.have_scissor; g_uw_sc = 1;
@@ -5126,35 +5228,40 @@ static void uw2d_begin(const Cmd *m, int indexed) {
         float u0 = 1e30f, u1 = -1e30f;
         for (uint64_t i = lo; i < hi; i++) { float t = ((const float *)((const uint8_t *)P(R.vbuf[0].addr) + i * 48))[4]; if (t < u0) u0 = t; if (t > u1) u1 = t; }
         if (fabsf((u1 - u0) - (x1 - x0) / W) < 0.01f) {
-            memcpy(g_uw_vtx, (const uint8_t *)P(R.vbuf[0].addr) + lo * 48, (size_t)(hi - lo) * 48);
-            for (uint64_t i = 0; i < hi - lo; i++) g_uw_vtx[i * 12 + 4] *= W / 1280.0f;
+            float tmp[64 * 12];
+            size_t nbytes = (size_t)(hi - lo) * 48;
+            memcpy(tmp, (const uint8_t *)P(R.vbuf[0].addr) + lo * 48, nbytes);
+            for (uint64_t i = 0; i < hi - lo; i++) tmp[i * 12 + 4] *= W / 1280.0f;
+            uw_write_cached(g_uw_vtx, tmp, nbytes);
             g_uw_vkeep = R.vbuf[0]; g_uw_von = 1; g_uw_vlo = (int64_t)lo;
-            R.vbuf[0].addr = (uint64_t)(uintptr_t)g_uw_vtx; R.vbuf[0].size = (hi - lo) * 48;
+            R.vbuf[0].addr = (uint64_t)(uintptr_t)g_uw_vtx; R.vbuf[0].size = nbytes;
         }
     }
-    float *p = g_uw_proj[k];
-    memcpy(p, o, (size_t)u[12].size);
-    p[0] = 2.0f / (k == 1 ? 1280.0f : W); p[1] = p[2] = 0; p[3] = -1.0f;
-    if (k == 3) p[3] = -1.0f + 2.0f * (W - 1280.0f) / W;
+    float tmp[64];
+    memcpy(tmp, o, (size_t)u[12].size);
+    tmp[0] = 2.0f / (k == 1 ? 1280.0f : W); tmp[1] = tmp[2] = 0; tmp[3] = -1.0f;
+    if (k == 3) tmp[3] = -1.0f + 2.0f * (W - 1280.0f) / W;
     if (k == 5) {
         float off = (W - 1280.0f) * 0.5f, a_ = (off + x1) / x1;
-        p[0] = 2.0f * a_ / W; p[3] = -1.0f + 2.0f * (off + x1 - a_ * x1) / W;
+        tmp[0] = 2.0f * a_ / W; tmp[3] = -1.0f + 2.0f * (off + x1 - a_ * x1) / W;
     }
     if (k == 2) {
         float off = (W - 1280.0f) * 0.5f, a_ = (1280.0f + off - x0) / (1280.0f - x0);
-        p[0] = 2.0f * a_ / W; p[3] = -1.0f + 2.0f * (off + x0 - a_ * x0) / W;
+        tmp[0] = 2.0f * a_ / W; tmp[3] = -1.0f + 2.0f * (off + x0 - a_ * x0) / W;
     }
+    uw_write_cached(g_uw_proj[k], tmp, (size_t)u[12].size);
     g_uw_keep = R.ubo[0][12]; g_uw_on = 1 + 12;
-    R.ubo[0][12].addr = (uint64_t)(uintptr_t)p;
+    R.ubo[0][12].addr = (uint64_t)(uintptr_t)g_uw_proj[k];
 }
-static void uw2d_end(void) {
+static void uw2d_end(int ok) {
     if (g_uw_on) { R.ubo[0][g_uw_on - 1] = g_uw_keep; g_uw_on = 0; }
     if (g_uw_von) { R.vbuf[0] = g_uw_vkeep; g_uw_von = 0; }
     if (g_uw_sc) { memcpy(R.scissor, g_uw_sc_keep, sizeof g_uw_sc_keep); R.have_scissor = g_uw_sc_had; R.dyn_dirty = 1; g_uw_sc = 0; }
     if (g_uw_bars > 0) {
         float W = g_uw_bars, sx = R.pass_rs ? R.pass_sx : 1.0f; g_uw_bars = 0;
+        if (!ok || !R.in_pass || R.ncol < 1) return;
         int side = (int)((W - 1280.0f) * 0.5f * sx + 0.5f), w = (int)(W * sx + 0.5f);
-        if (!R.in_pass || R.ncol < 1 || side <= 0 || w > R.pass_w) return;
+        if (side <= 0 || w > R.pass_w) return;
         VkClearAttachment ca; VkClearRect cr[2];
         memset(&ca, 0, sizeof ca); memset(cr, 0, sizeof cr);
         ca.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; ca.colorAttachment = 0; ca.clearValue.color.float32[3] = 1.0f;
@@ -5383,7 +5490,7 @@ static void exec(const Cmd *m, int depth) {
     case OP_DRAW_ARRAYS: {
         uw2d_begin(m, 0);
         int uw_first0 = g_uw_von;
-        { LONG64 t0 = tk(); int ok = draw_prepare((unsigned)a[0]); g_tm[8] += tk() - t0; uw2d_end(); { int dtag = nvn_front_draw_tag(); if (dtag) dt_vk(dtag, nvn_front_draw_tag_next(), ok, m, 0, NULL); } shlog_draw(ok, m, 0); if (!ok) { R.frame_skipped++; nvn_front_count(1, 1); break; } }
+        { LONG64 t0 = tk(); int ok = draw_prepare((unsigned)a[0]); g_tm[8] += tk() - t0; uw2d_end(ok); { int dtag = nvn_front_draw_tag(); if (dtag) dt_vk(dtag, nvn_front_draw_tag_next(), ok, m, 0, NULL); } shlog_draw(ok, m, 0); if (!ok) { R.frame_skipped++; nvn_front_count(1, 1); break; } }
         vkCmdDraw(R.cmd, (uint32_t)a[2], (uint32_t)a[4], uw_first0 ? 0 : (uint32_t)a[1], (uint32_t)a[3]);
         fsr_mv_commit(0, NULL, 0, VK_INDEX_TYPE_UINT16, (uint32_t)a[2], (uint32_t)a[4], uw_first0 ? 0 : (uint32_t)a[1], 0, (uint32_t)a[3]);
         ckpt(2, NULL, NULL, NULL);
@@ -5407,7 +5514,7 @@ static void exec(const Cmd *m, int depth) {
         if (ikept) ikept->busy = R.serial + 2;
         uw2d_begin(m, 1);
         int64_t uw_vadj = g_uw_von ? g_uw_vlo : 0;
-        { LONG64 t0 = tk(); int ok = draw_prepare((unsigned)a[0]); g_tm[8] += tk() - t0; uw2d_end(); { int dtag = nvn_front_draw_tag(); if (dtag) dt_vk(dtag, nvn_front_draw_tag_next(), ok, m, 1, &ib); } shlog_draw(ok, m, 1); if (!ok) { R.frame_skipped++; nvn_front_count(1, 1); break; } }
+        { LONG64 t0 = tk(); int ok = draw_prepare((unsigned)a[0]); g_tm[8] += tk() - t0; uw2d_end(ok); { int dtag = nvn_front_draw_tag(); if (dtag) dt_vk(dtag, nvn_front_draw_tag_next(), ok, m, 1, &ib); } shlog_draw(ok, m, 1); if (!ok) { R.frame_skipped++; nvn_front_count(1, 1); break; } }
         if (ikept) ikept->busy = R.serial + 1;
         VkIndexType it = t == 0 ? VK_INDEX_TYPE_UINT8_EXT : t == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
         if (!dsh_on() || !g_dsh_ib_ok || g_dsh_ib != ib.buf || g_dsh_iboff != ib.off || g_dsh_it != it) {
@@ -5549,6 +5656,7 @@ static void exec(const Cmd *m, int depth) {
         memcpy(&sv, blob, sizeof sv); memcpy(sr, blob + 24, 24); memcpy(&dv, blob + 48, sizeof dv); memcpy(dr, blob + 72, 24);
         if (a[6] & 4) { dr[0] += dr[3]; dr[3] = -dr[3]; }
         if (a[6] & 8) { dr[1] += dr[4]; dr[4] = -dr[4]; }
+        if (uw_log_on() && uw_cap_now()) printf("UWCAP copy %dx%d [%d,%d %dx%d] -> %dx%d [%d,%d %dx%d]\n", s->b.width, s->b.height, sr[0], sr[1], sr[3], sr[4], d->b.width, d->b.height, dr[0], dr[1], dr[3], dr[4]);
         blit_tex(s, &sv, sr, d, &dv, dr, (int)(a[6] & 1));
         lr_record(d);                                  /* [Recomps#1] finding 118: texels the game reads on the CPU */
         if (g_dump_on) dump_tex_op(s, d, "copy");
@@ -6406,6 +6514,7 @@ static void vk_present2(void *arg, int progress) {
     { int step = nvn_front_take_step_shot(); if (step && vt) { char path[300]; const char *dir = getenv("WT_SHOT_DIR"); snprintf(path, sizeof path, "%s%sstep_%03d.bmp", dir ? dir : "", dir ? "/" : "", step - 1); save_bmp_vk(path, vt); } }
     nvn_front_draw_tag_clear();
     if (j->shot_fight && vt) { char path[300]; const char *dir = getenv("WT_SHOT_DIR"); snprintf(path, sizeof path, "%s%sfight_%05d.bmp", dir ? dir : "", dir ? "/" : "", j->shot_fight); save_bmp_vk(path, vt); printf("shot: fight frame %d saved at presented frame %lld (Vulkan)\n", j->shot_fight, (long long)frame); }      /* session 13, WT_SHOT_FIGHT */
+    if (vt && g_uw_cap_shot) { char name[64], path[300]; snprintf(name, sizeof name, "uwcap_%lld.bmp", (long long)frame); uw_tmp_path(path, sizeof path, name); save_bmp_vk(path, vt); g_uw_cap_shot = 0; }   /* WT_UW_LOG: captured frame's screenshot */
     if (vt && (frame == shot || (every > 0 && frame >= shot_from && frame <= shot_to && frame % every == 0))) {
         char path[300];
         const char *dir = getenv("WT_SHOT_DIR");
