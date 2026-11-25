@@ -126,7 +126,7 @@ fn parse(args: &[String]) -> Result<Args, String> {
                 .ok_or(format!("argument {}: expected one argument", k))
         };
         match k {
-            "--dump" => a.dump = Some(val()?),
+            "--dump" | "--game" => a.dump = Some(val()?),
             "--update" => a.update = Some(val()?),
             "--keys" => a.keys = Some(val()?),
             "--jobs" => a.jobs = Some(val()?.parse().map_err(|_| "argument --jobs: invalid int value".to_string())?),
@@ -978,7 +978,7 @@ fn step_mods(cx: &mut Ctx) -> Result<(), Fail> {
     if !nso_p.is_file() || !elf.is_file() {
         return Err(Fail("targets/exefs/main / main.elf are missing: run convert first".into()));
     }
-    let settings = pchtxt::read_settings(&cx.root().join("config").join("mods.ini")); // the launcher's Mods window switches
+    let settings = pchtxt::read_settings(&crate::util::mods_ini(cx.root())); // the launcher's Mods window switches
     let rel = |f: &PathBuf| f.strip_prefix(&folder_p).unwrap_or(f).to_string_lossy().into_owned();
     let mut off: Vec<String> = files
         .iter()
@@ -1431,5 +1431,9 @@ mod tests {
         assert_eq!(a.update.as_deref(), Some("upd.nsp"));
         assert_eq!(a.keys.as_deref(), Some("prod.keys"));
         assert_eq!(a.only.as_deref(), Some("verify"));
+
+        let g = parse(&["--game=folder".into(), "--keys=prod.keys".into()]).unwrap();
+        assert_eq!(g.dump.as_deref(), Some("folder"));
+        assert_eq!(g.keys.as_deref(), Some("prod.keys"));
     }
 }

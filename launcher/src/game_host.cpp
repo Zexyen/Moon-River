@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -19,6 +20,19 @@ namespace {
 std::string program_dir(int program) { return program ? "/program" + std::to_string(program) : ""; }
 std::string main_elf(const Paths& paths, int program = 0) { return paths.repo + "/targets" + program_dir(program) + "/exefs/main.elf"; }
 std::string program_build(const Paths& paths, int program) { return paths.build + program_dir(program); }
+std::string game_log(const Paths& paths) { return paths.logs + "/moon-river-game.log"; }
+
+// the last runs' logs stay beside the new one: moon-river-game.1.log is the run before, up to .4
+void keep_old_logs(const std::string& log)
+{
+	namespace fs = std::filesystem;
+	const std::string stem = log.substr(0, log.size() - 4);
+	std::error_code ec;
+	fs::remove(stem + ".4.log", ec);
+	for (int i = 3; i >= 1; i--)
+		fs::rename(stem + "." + std::to_string(i) + ".log", stem + "." + std::to_string(i + 1) + ".log", ec);
+	fs::rename(log, stem + ".1.log", ec);
+}
 
 // the save folder, where the runtime leaves the switch file (runtime/mr_imports.c switch_path; ..\userdata from build/run)
 std::string switch_file(const Paths& paths)
@@ -27,7 +41,7 @@ std::string switch_file(const Paths& paths)
 	if (e && e[0])
 		return e;
 	const char* u = std::getenv("MR_USERDATA");
-	return (u && u[0] ? std::string(u) : paths.build + "/userdata") + "/program_switch.bin";
+	return (u && u[0] ? std::string(u) : paths.userdata) + "/program_switch.bin";
 }
 
 #ifndef _WIN32
@@ -36,11 +50,12 @@ volatile int32_t* g_display_close = nullptr;  // runtime/display.c (a LONG): the
 bool g_relaunch = true;                       // the launcher starts again when the game ends (not with --play)
 int g_out = -1, g_err = -1;                   // the launcher's own stdout / stderr while the game writes to its log
 
-// The game's output goes to build/run/moon-river-game.log, as on Windows: a launcher started from a desktop entry has no
-// terminal, and the log is what a bug report needs
+// The game's output goes to build/run/moon-river-game.log (or <data>/logs/), as on Windows: a launcher started from a
+// desktop entry has no terminal, and the log is what a bug report needs
 void log_to_file(const Paths& paths)
 {
-	std::string log = paths.run + "/moon-river-game.log";
+	std::string log = game_log(paths);
+	keep_old_logs(log);
 	std::fprintf(stderr, "launcher: the game's output goes to %s\n", log.c_str());
 	std::fflush(nullptr);
 	int fd = open(log.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
@@ -107,11 +122,16 @@ GameStart prepare_game(const Paths& paths, int program, bool after_switch)
 	const bool other = after_switch || (last && std::strcmp(last, std::to_string(program).c_str()) != 0);
 	set_env("MR_ROMFS", paths.repo + "/targets" + program_dir(program) + "/romfs", other);
 	set_env("MR_PROGRAM", std::to_string(program), true);
-	if (program || other)
+	if (program || other || !paths.data.empty())
 	{                                            // each program its own shaders: the container store is tied to its root_000.pkz
 		const std::string own = program ? "-program" + std::to_string(program) : "";
-		set_env("MR_VK_CACHE", paths.build + "/cache/vk" + own, true);
-		set_env("MR_VK_CONTAINERS", paths.build + "/cache/vk_containers2" + own, true);
+		set_env("MR_VK_CACHE", paths.cache + "/vk" + own, true);
+		set_env("MR_VK_CONTAINERS", paths.cache + "/vk_containers2" + own, true);
+	}
+	if (!paths.data.empty())
+	{                                            // the data folder (Paths::find): the saves and the OpenGL renderer's shaders there too
+		set_env("MR_USERDATA", paths.userdata, false);
+		set_env("MR_SHADER_CACHE", paths.cache + "/shaders", false);
 	}
 	// program N's exe is in build/programN, where the runtime's <exe>/../config would be build/config
 	const std::string config = paths.config + "/controllers.ini";
@@ -152,10 +172,11 @@ void run_in_process(GameStart&, const Paths&, SDL_Window*, bool) { std::abort();
 int run_child(const Paths& paths, SDL_Window* window, int program)
 {
 	SDL_HideWindow(window);
-	// its output goes to build/run/moon-river-game.log: this program has no console to show it in
+	// its output goes to build/run/moon-river-game.log (or <data>/logs/): this program has no console to show it in
 	ChildProcess game;
 	int code = -1;
-	if (game.start({program_build(paths, program) + "/" + GAME_EXE, main_elf(paths, program)}, paths.run, paths.run + "/moon-river-game.log"))
+	keep_old_logs(game_log(paths));
+	if (game.start({program_build(paths, program) + "/" + GAME_EXE, main_elf(paths, program)}, paths.run, game_log(paths)))
 		while (!game.wait(&code, 50))
 			SDL_PumpEvents();
 	SDL_ShowWindow(window);
