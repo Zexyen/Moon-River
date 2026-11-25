@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/moon-river-logo.svg" alt="Moon River" width="720">
+</p>
+
 # Moon River
 
 A static recompilation of **Bayonetta 2** (Nintendo Switch, version 1.2 / update v131072) for PC, built on the
