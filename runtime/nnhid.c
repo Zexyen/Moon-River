@@ -14,6 +14,7 @@
 #include "runtime.h"
 #include "hostrt.h"
 #include "nnpad.h"
+#include "prompts.h"
 
 #define A0 (c->x[0])
 #define A1 (c->x[1])
@@ -652,6 +653,7 @@ static void fill_pad(uint64_t out, uint32_t id, int style_is_fullkey) {
     }
     if (id == 0) {                                            /* which device player 1 uses now: button prompts follow it (nnpad_button_prompts) */
         if (prompts_used >= 0 && prompts_used != g_used) { g_used = prompts_used; nnpad_prompts_used(g_used); }
+        prompts_menu_swap_tick();                             /* [moonriver] keep in-game menu confirm/cancel masks & guide icons in sync with swap_confirm */
     }
     if (id == 0) record_or_replay(&buttons, &lx, &ly);
     if (lx < -STICK_MAX / 2) buttons |= 1ull << BTN_SL_LEFT;

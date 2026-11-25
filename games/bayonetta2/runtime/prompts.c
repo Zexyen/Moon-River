@@ -13,7 +13,8 @@
  * Switching controller, keyboard/mouse (button_prompts = auto), PC Settings options (Button prompts / Face buttons),
  * or editing controllers.ini updates the prompt state key and re-uploads the atlases live on the next frame, with no
  * restart and no modification of guest memory. External RomFS prompt mods have different texture hashes and are left
- * untouched. Also keeps Bayonetta 2's action-prompt ring button table (0x7101464340, Finding 148) in sync live.
+ * untouched. Also keeps Bayonetta 2's action-prompt ring button table (0x7101464340, Finding 148) and menu
+ * confirm/cancel swap state (0x71034fdf54, 0x71018e4810/14, 0x7101537d88) in sync live.
  *
  * Optional debug env vars:
  *   MR_PROMPTS=switch|playstation|xbox|keyboard   override controllers.ini button_prompts
@@ -723,6 +724,77 @@ static void prompts_sync_ring(int want_letter) {
 #endif
 }
 
+/* ================================================================ Menu confirm/cancel swap (swap_confirm)
+ * Bayonetta 2 v1.2 stores two global bitmasks read by in-game menus (and not gameplay):
+ *   0x71018e4810  confirm mask (default 0x10 = Pro A)
+ *   0x71018e4814  cancel mask  (default 0x20 = Pro B)
+ * Every frame, f_710098fc64 refreshes both masks from the system confirm-swap flag at 0x71034fdf54 (via
+ * f_7100dab818 -> f_7100dab598; initialized to 0 by f_7100dab2c4 on Switch). Writing 0x71034fdf54 makes
+ * the game keep confirm/cancel in sync every frame, and updating 0x71018e4810/14 immediately avoids a
+ * one-frame lag on the poll that changes the setting or switches between pad and keyboard.
+ *
+ * Inline menu button prompts resolve through a 46-entry table at 0x7101537d88 ({u32 id, u32 crc31, f32, f32},
+ * searched by f_7100bd1b0c):
+ *   [0] id=0  Confirm (default 0x1760995e = crc32("btn_002") & 0x7fffffff = A)
+ *   [1] id=1  Cancel  (default 0x0e69c8e4 = crc32("btn_001") & 0x7fffffff = B)
+ *   [2] id=2  B       (0x0e69c8e4 = btn_001, gameplay/explicit B - left untouched)
+ *   [3] id=3  A       (0x1760995e = btn_002, gameplay/explicit A - left untouched) */
+#define B2_PAD_A        0x10u
+#define B2_PAD_B        0x20u
+#define B2_PIC_A        0x1760995eu   /* crc32("btn_002") & 0x7fffffff */
+#define B2_PIC_B        0x0e69c8e4u   /* crc32("btn_001") & 0x7fffffff */
+#define B2_CONFIRM_BITS 0x71018e4810ULL
+#define B2_CANCEL_BITS  0x71018e4814ULL
+#define B2_SWAP_FLAG    0x71034fdf54ULL
+#define B2_GUIDE_TABLE  0x7101537d88ULL
+
+/* Exposed for unit tests (tests/prompts_test.c) as well as live prompts_menu_swap_tick(). */
+int prompts_apply_menu_swap_at(int want_swap, uint32_t *swap_flag, uint32_t *confirm_bits,
+                               uint32_t *cancel_bits, uint32_t *guide_raw,
+                               int (*make_rw)(void *, size_t)) {
+    if (!swap_flag || !confirm_bits || !cancel_bits) return 0;
+    uint32_t cur_c = *confirm_bits, cur_x = *cancel_bits;
+    if (!((cur_c == B2_PAD_A && cur_x == B2_PAD_B) || (cur_c == B2_PAD_B && cur_x == B2_PAD_A)))
+        return 0;
+
+    uint32_t want_flag    = want_swap ? 1u : 0u;
+    uint32_t want_confirm = want_swap ? B2_PAD_B : B2_PAD_A;
+    uint32_t want_cancel  = want_swap ? B2_PAD_A : B2_PAD_B;
+    uint32_t want_pic0    = want_swap ? B2_PIC_B : B2_PIC_A;
+    uint32_t want_pic1    = want_swap ? B2_PIC_A : B2_PIC_B;
+    int changed = 0;
+
+    if (*swap_flag != want_flag) { *swap_flag = want_flag; changed = 1; }
+    if (cur_c != want_confirm)   { *confirm_bits = want_confirm; changed = 1; }
+    if (cur_x != want_cancel)    { *cancel_bits  = want_cancel;  changed = 1; }
+
+    if (guide_raw && guide_raw[0] == 0u && guide_raw[4] == 1u) {
+        uint32_t h0 = guide_raw[1], h1 = guide_raw[5];
+        if ((h0 == B2_PIC_A && h1 == B2_PIC_B) || (h0 == B2_PIC_B && h1 == B2_PIC_A)) {
+            if (h0 != want_pic0 || h1 != want_pic1) {
+                if (!make_rw || make_rw(guide_raw, 8 * sizeof(uint32_t))) {
+                    guide_raw[1] = want_pic0;
+                    guide_raw[5] = want_pic1;
+                    changed = 1;
+                }
+            }
+        }
+    }
+    return changed;
+}
+
+#ifndef PROMPTS_NO_WIN
+static int make_guide_rw(void *p, size_t n) {
+    static int rw_done = 0;
+    if (rw_done) return 1;
+    DWORD old = 0;
+    /* Keep this .rodata page writable once touched so concurrent pad polls cannot race VirtualProtect. */
+    if (!VirtualProtect(p, n, PAGE_READWRITE, &old)) return 0;
+    rw_done = 1;
+    return 1;
+}
+#endif
+
 /* ================================================================ Family & state key */
 static int env_prompts_override(void) {
     const char *e = getenv("MR_PROMPTS");
@@ -737,6 +809,28 @@ static int env_prompts_override(void) {
 static int current_family(void) {
     int ov = env_prompts_override();
     return ov ? ov : nnpad_button_prompts();
+}
+
+void prompts_menu_swap_tick(void) {
+#ifndef PROMPTS_NO_WIN
+    static int mapped = 0;
+    uint32_t *swap_flag    = (uint32_t *)(uintptr_t)B2_SWAP_FLAG;
+    uint32_t *confirm_bits = (uint32_t *)(uintptr_t)B2_CONFIRM_BITS;
+    uint32_t *cancel_bits  = (uint32_t *)(uintptr_t)B2_CANCEL_BITS;
+    uint32_t *guide        = (uint32_t *)(uintptr_t)B2_GUIDE_TABLE;
+    if (!mapped) {
+        if (IsBadReadPtr(confirm_bits, 8) || IsBadReadPtr(swap_flag, 4) || IsBadReadPtr(guide, 32))
+            return;
+        mapped = 1;
+    }
+    int want = nnpad_menu_swapped() && current_family() != 4;
+    if (prompts_apply_menu_swap_at(want, swap_flag, confirm_bits, cancel_bits, guide, make_guide_rw) &&
+        getenv("MR_PROMPTS_LOG")) {
+        printf("prompts: swap_confirm -> %s (confirm=0x%x cancel=0x%x)\n",
+               want ? "on (B confirm, A back)" : "off (A confirm, B back)",
+               *confirm_bits, *cancel_bits);
+    }
+#endif
 }
 
 uint64_t prompts_state_key(void) {
