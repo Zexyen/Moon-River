@@ -5,7 +5,8 @@
  *   - Findings 146 & 150: cutscenes release deleted characters and rebind safely when no package is unloading;
  *   - Finding 148: action prompt ring crescent rotates to match printed-letter button positions;
  *   - Findings 107, 113, 114, 129, 134, 136, 139, 144: >60 fps (up to 120 fps) clock, smart tick counters,
- *     float timer overshoot reloads, closed-form smoothings, cinematic shot holds, and time-channel 0 slowmo;
+ *     float timer overshoot reloads, closed-form smoothings, cinematic shot holds, time-channel 0 slowmo,
+ *     and movie player timeout scaling;
  *   - Ultrawide (21:9 / 32:9): Hor+ render width & centered 2D projection driven by RECOMPS_UW_WIDTH / RECOMPS_ASPECT.
  *
  * Uses only standard C / UCRT symbols and avoids TLS runtime dependencies so it links cleanly into both
@@ -695,6 +696,25 @@ int recomps_slowmo_align(Ctx *c) {
     vzero(&c->v[0]);
     c->v[0].f[0] = rem / s < 1.0f ? rem / s : 1.0f;
     return 0;
+}
+
+/* Movie timeout above 60 fps (B2recomp issue #63 / PR #65). The game's movie player 0x7100b75dc0
+ * sets a float timeout of (length_s + 1.5) * 30 ([0x710186d000 + 2248] + 4) and subtracts 1.0
+ * each update (0x7100b76284); at 0 it ends the movie. During a movie the game asks for 30 fps
+ * (bit 37 of [0x71018668e0] + 4), which is ignored above 60 fps, cutting movies off at ~1/4 length
+ * at 120 fps. Scale the decrement by step / k (k = 2 while 30 fps is requested, else 1).
+ * RECOMPS_MOVIE_FIX=0 restores the game's own. */
+int recomps_movie_fix_on(void) {
+    static int v = -1;
+    if (v < 0) { const char *e = getenv("RECOMPS_MOVIE_FIX"); v = recomps_uncap_on() && (!e || atoi(e)); }
+    return v;
+}
+void recomps_movie_timeout_step(Ctx *c) {
+    uint64_t p_flag = rd64(0x71018668e0ULL), p_clk = rd64(0x7101867708ULL);
+    if (!p_flag || !p_clk) return;
+    float k = (rd32(p_flag + 4) >> 5 & 1) ? 2.0f : 1.0f;
+    float s = recomps_uncap_f(p_clk + 200);
+    if (s > 0.0f) c->v[1].f[0] = c->v[1].f[0] * s / k;
 }
 
 /* ============================================================================

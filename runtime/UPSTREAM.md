@@ -244,3 +244,11 @@ list), `gen/make_gen.py` (layout from DYNAMIC, DT_INIT, NVN 13.3.2 device answer
   RECOMPS_ASPECT); `r2_imports.c` more application memory for the wider render-target heap; `nvn_vk_draw.c` 16:9 targets in a
   wider window made wider (`rs_xstretch`, `rs_169_class`), `mx_fcs_y` (push constants 16 -> 20 bytes, also `nvn_vk_m4.c`);
   `mx_translate.c` `gl_FragCoord.y` scaled by `mx_fcs_y`; `nvn_vk_m4.c` fragment-stage key `rs1` -> `rs2`.
+
+## Movie playback (ported from B2recomp PR #65 / issue #63)
+- `nnaudio.c`: AudioOut is per guest object (up to 4, `AoDev`): each has its own buffer queue, released list, event
+  (including its own private event for SDK 13's no-event `OpenDefaultAudioOut`), waveOut stream, clock, host lead state
+  (issue 157), and statistics (log lines tagged `[n]`); every AudioOut import looks it up by its `AudioOut *`. Upstream
+  had one global AudioOut; during `.usm` movie playback Bayonetta 2 opens CRI Atom's AudioOut alongside Wwise's, which
+  reset the shared queue and caused both clients to take each other's released buffers (~1/6 movie playback speed).
+  `MR_WAV` / `MR_AUDIO_HASH` follow the first AudioOut, as before.

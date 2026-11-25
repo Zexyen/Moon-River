@@ -7,7 +7,7 @@ name: mrbuild
 on:
   pull_request:
     paths: ['tools/mrbuild/**', 'lifter/**', 'games/**', 'runtime/gen_static/**', 'runtime/freestanding/**',
-            'runtime/*.h', 'runtime/mx_translate.c', 'runtime/tex_decode.c', 'runtime/tex_pack.c', 'runtime/achievements.c', 'runtime/third_party/rl_achievements/**', 'tests/achievements_test.c', 'tests/bc7_encode_test.c', 'tests/tex_pack_test.c', 'tests/plat_hash_test.c', 'tests/mx_loop_guard_test.c', 'tests/mx_quad_test.c', 'tests/mx_prev_test.c', 'tests/mv_match_test.c', 'tools/lifter-check/**', '.gitattributes', '.github/workflows/mrbuild.yml']
+            'runtime/*.h', 'runtime/mx_translate.c', 'runtime/tex_decode.c', 'runtime/tex_pack.c', 'runtime/achievements.c', 'runtime/nnaudio.c', 'runtime/third_party/rl_achievements/**', 'tests/achievements_test.c', 'tests/nnaudio_test.c', 'tests/bc7_encode_test.c', 'tests/tex_pack_test.c', 'tests/plat_hash_test.c', 'tests/mx_loop_guard_test.c', 'tests/mx_quad_test.c', 'tests/mx_prev_test.c', 'tests/mv_match_test.c', 'tools/lifter-check/**', '.gitattributes', '.github/workflows/mrbuild.yml']
   workflow_dispatch:
 
 jobs:
@@ -88,6 +88,12 @@ jobs:
             runtime/third_party/rl_achievements/third_party/rcheevos/src/util/*.c \
             -lm -o "$RUNNER_TEMP/achievements_test"
           "$RUNNER_TEMP/achievements_test"
+
+      - name: Multi-AudioOut isolation (runtime/nnaudio.c, B2recomp PR #65)
+        run: |
+          clang -O2 -Wall -D_GNU_SOURCE -I runtime/posix -I runtime/split -I runtime '-D__declspec(x)=' \
+            tests/nnaudio_test.c runtime/plat_posix.c -lm -lpthread -o "$RUNNER_TEMP/nnaudio_test"
+          "$RUNNER_TEMP/nnaudio_test"
 
   lifter-check:
     # the shipped lifter against Unicorn: random words of the forms added to the lifter, run in Unicorn and as their lifted C
