@@ -5313,6 +5313,7 @@ static void uw2d_begin(const Cmd *m, int indexed) {
     }
     static long long g_uw_bg_frame = -1;
     static int g_uw_menu_bg = 0, g_uw_hud_seen = 0, g_uw_menu_prev = 0;
+    static int g_uw_shop = 0, g_uw_shop_side = 0;
     {
         long long f = nvn_front_frame_next();
         if (f != g_uw_bg_frame) {
@@ -5320,25 +5321,57 @@ static void uw2d_begin(const Cmd *m, int indexed) {
             g_uw_bg_frame = f;
             g_uw_menu_bg = 0;
             g_uw_hud_seen = 0;
+            g_uw_shop = 0;
+            g_uw_shop_side = 0;
         }
     }
     int k = -1;
     int onscreen = fabsf(R.viewport[2] - W) <= 0.5f && !(R.ncol && R.col[0].tex && fabsf((float)R.col[0].tex->b.width - W) > 0.5f);
     if (onscreen && fabsf(w[3] - 45.0f) < 25.0f && fabsf(w[7] - 52.0f) < 25.0f && x0 >= 15.0f && x1 <= 400.0f && y0 >= 10.0f && y1 <= 110.0f)
         g_uw_hud_seen = 1;
+    if (onscreen && !gfx_options()->hud_centre && !g_uw_hud_seen && !g_uw_menu_bg && !g_uw_shop &&
+        x1 - x0 >= 440.0f && x1 - x0 <= 520.0f && y1 - y0 >= 95.0f && y1 - y0 <= 130.0f && y0 >= 15.0f && y0 <= 45.0f && x1 <= 520.0f) {
+        Tex *st; View sv; SamplerParams ssp;
+        if ((tex_lookup(1, 0, &st, &sv, &ssp) & 1) && st && !st->dead && st->b.width == 2048 && st->b.height == 256)
+            g_uw_shop = 1;
+    }
     if (!onscreen) k = 1;
-    else if ((fabsf(x0 + x1 - 1280.0f) < 40.0f && x1 - x0 > 1150.0f && x1 - x0 < 1400.0f) || (fabsf(x0 + x1 - 1280.0f) < 160.0f && x0 <= 10.0f && x1 >= 1270.0f && x1 - x0 < W - 1.0f && y0 <= 10.0f && y1 >= 710.0f)) { if (y0 <= 10.0f && y1 >= 710.0f) g_uw_menu_bg = 1; k = 1; }
-    else if (fabsf(x0 + x1 - 1280.0f) < 40.0f && x1 - x0 >= W - 1.0f && y0 <= 10.0f && y1 >= 710.0f) { g_uw_menu_bg = 1; return; }
-    else if (x0 < 1.0f && x1 > W - 1.0f && y0 < 1.0f && y1 > 719.0f) { g_uw_menu_bg = 1; k = 0; }
-    else if (y1 - y0 >= 200.0f && ((fabsf(w[3] - 1280.0f) < 0.5f && x1 > 1279.0f && x1 < 1281.0f && x0 > 320.0f && 1280.0f - x0 > 1.0f) || (x1 > 1300.0f && x0 > 320.0f && x0 < 1260.0f))) { g_uw_menu_bg = 1; k = 2; }
-    else if (y1 - y0 >= 200.0f && ((fabsf(w[3]) < 0.5f && x0 > -1.0f && x0 < 1.0f && x1 > 1.0f && x1 < 960.0f) || (x0 < -20.0f && x1 > 20.0f && x1 < 960.0f))) { g_uw_menu_bg = 1; k = 5; }
+    else if ((fabsf(x0 + x1 - 1280.0f) < 40.0f && x1 - x0 > 1150.0f && x1 - x0 < 1400.0f) || (fabsf(x0 + x1 - 1280.0f) < 160.0f && x0 <= 10.0f && x1 >= 1270.0f && x1 - x0 < W - 1.0f && y0 <= 10.0f && y1 >= 710.0f)) { if (y0 <= 10.0f && y1 >= 710.0f) { g_uw_menu_bg = 1; if (g_uw_shop) { g_uw_shop = 2; g_uw_shop_side = 0; } } k = 1; }
+    else if (fabsf(x0 + x1 - 1280.0f) < 40.0f && x1 - x0 >= W - 1.0f && y0 <= 10.0f && y1 >= 710.0f) { g_uw_menu_bg = 1; if (g_uw_shop) { g_uw_shop = 2; g_uw_shop_side = 0; } return; }
+    else if (x0 < 1.0f && x1 > W - 1.0f && y0 < 1.0f && y1 > 719.0f) { g_uw_menu_bg = 1; if (g_uw_shop) { g_uw_shop = 2; g_uw_shop_side = 0; } k = 0; }
+    else if (!g_uw_shop && y1 - y0 >= 200.0f && ((fabsf(w[3] - 1280.0f) < 0.5f && x1 > 1279.0f && x1 < 1281.0f && x0 > 320.0f && 1280.0f - x0 > 1.0f) || (x1 > 1300.0f && x0 > 320.0f && x0 < 1260.0f))) { g_uw_menu_bg = 1; k = 2; }
+    else if (!g_uw_shop && y1 - y0 >= 200.0f && ((fabsf(w[3]) < 0.5f && x0 > -1.0f && x0 < 1.0f && x1 > 1.0f && x1 < 960.0f) || (x0 < -20.0f && x1 > 20.0f && x1 < 960.0f))) { g_uw_menu_bg = 1; k = 5; }
     else {
         if (!g_uw_hud_seen && x1 - x0 >= 300.0f && y1 - y0 >= 250.0f && y0 >= 40.0f && y1 <= 680.0f)
             g_uw_menu_bg = 1;
         int wide_hud = !gfx_options()->hud_centre && (g_uw_hud_seen || (!g_uw_menu_bg && !g_uw_menu_prev));
         int wbased = w[3] > 1280.0f + (W - 1280.0f) * 0.25f && w[3] <= W + 0.5f && y1 < 140.0f;
         int has_scr = !wbased && hi - lo <= 64 && x1 - x0 > 1.0f && uw_has_screen_tex((int)(W + 0.5f));
-        if (wide_hud && wbased) {
+        if (g_uw_shop == 1) {
+            if (x1 - x0 >= 450.0f && y1 - y0 >= 400.0f && y0 >= 40.0f && y1 <= 680.0f) {
+                if (x0 >= 1275.0f || (x1 - x0 >= 1050.0f && x1 >= 1260.0f && x0 >= 30.0f)) g_uw_shop_side = 2;
+                else if (x0 < 1275.0f) g_uw_shop_side = 1;
+                else g_uw_shop_side = 0;
+            } else if (x1 - x0 >= 300.0f && y1 - y0 >= 150.0f && x0 > 100.0f && x1 < 1180.0f && fabsf(x0 + x1 - 1280.0f) < 60.0f) {
+                g_uw_shop_side = 0;
+            }
+            if (y0 >= 600.0f && x0 >= 750.0f && x1 <= 1300.0f) {
+                g_uw_shop_side = 0;
+                k = 3;
+            } else if (g_uw_shop_side == 1) {
+                k = 0;
+            } else if (g_uw_shop_side == 2) {
+                k = 3;
+            } else if (x0 >= -20.0f && x1 <= 560.0f && y1 <= 160.0f) {
+                k = 0;
+            } else if (x0 >= 900.0f && x1 <= 1300.0f && y1 <= 140.0f) {
+                k = 3;
+            }
+            if (k == 3 && R.have_scissor && !(R.scissor[0] <= 0 && R.scissor[0] + R.scissor[2] >= (int)W)) {
+                memcpy(g_uw_sc_keep, R.scissor, sizeof g_uw_sc_keep); g_uw_sc_had = R.have_scissor; g_uw_sc = 1;
+                R.scissor[0] += (int)(W - 1280.0f); R.dyn_dirty = 1;
+            }
+        } else if (wide_hud && wbased) {
             k = 0;
         } else if (wide_hud && w[3] > 1280.5f && w[3] < 1280.0f + (W - 1280.0f) * 0.25f) {
             k = 3;
