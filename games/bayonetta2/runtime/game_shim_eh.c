@@ -455,6 +455,19 @@ int recomps_fps_cf(Ctx *c, uint64_t key, uint64_t field, float w, int sign) {
     return (int)de;
 }
 
+float recomps_fps_fs(Ctx *c, uint64_t key, uint64_t field) {
+    (void)c;
+    if (!recomps_uncap_on() || !recomps_fps_n) return 1.0f;
+    if (!fps_smart_on()) return (float)recomps_fps_tick;
+    uint64_t n = __atomic_load_n(&recomps_fps_n, __ATOMIC_ACQUIRE);
+    FpsRec *r = fps_find(key, field);
+    float f = r->U == n ? r->f : r->U == n - 1 ? fps_stab[n & 255] : 1.0f;
+    if (!(f > 0.0f)) f = 0.0f;
+    else if (f > 4.0f) f = 4.0f;
+    r->f = f; r->U = n; r->S = fps_gtab[n & 255];
+    return f;
+}
+
 static struct { int64_t d; float a; } fps_lin[16][4];
 static unsigned fps_lin_tid(Ctx *c) { return (unsigned)((c->tpidr >> 6) & 15u); }
 
@@ -493,9 +506,10 @@ float recomps_fps_smk(Ctx *c, float k, uint64_t key, uint64_t field) {
     float f = r->U == n ? r->f : r->U == n - 1 ? fps_stab[n & 255] : 1.0f;
     r->f = f; r->U = n; r->S = fps_gtab[n & 255];
     fps_sm[0]++;
-    if (f == 1.0f || !(k > 0.0f && k < 1.0f) || !(f > 0.0f)) return k;
-    fps_sm[1]++;
-    return 1.0f - powf(1.0f - k, f);
+    if (f == 1.0f || !(f > 0.0f)) return k;
+    if (k > 0.0f && k < 1.0f) { fps_sm[1]++; return 1.0f - powf(1.0f - k, f); }
+    if (k < 0.0f && k > -1.0f) { fps_sm[1]++; return -(1.0f - powf(1.0f + k, f)); }
+    return k;
 }
 
 void recomps_fps_reload(Ctx *c, int C, int X) {

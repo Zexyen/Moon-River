@@ -147,3 +147,42 @@
 71007a931c L_71007a93bc int  +1536 hit-stop delay
 71009b1654 L_71009b16f0 int  +1536 hit-stop delay
 7100a14d6c L_7100a14fa8 int  +1536 hit-stop delay
+# combo manager & player combo/input buffers
+7100b09058 L_7100b090b4 int  combo manager +400 move-repeat decay countdown, stops at 0
+7100b0b0bc L_7100b0b118 int  combo manager +468 frame counter (up to 999)
+7100026048 L_7100026a38 int  player +0x4e30 input buffer countdown, stops at 0
+7100026048 L_7100026a6c int  player +0x4e20 input buffer countdown, stops at 0
+7100026048 L_7100026db0 int  player +0x4e38 input buffer countdown, stops at 0
+7100027754 L_7100028048 f1   player +0x55ac float countdown (-1.0 while > 0, sibling of +0x55b0)
+# combo HUD & UI fixed -1/60 / +1/60 second-based timers (smooth fractional step)
+7100bb7a30 L_7100bb837c fs v1 combo/HUD result hold timer #1 (-1/60 per pass)
+7100bb7a30 L_7100bb839c fs v1 combo/HUD result hold timer #2 (0.5s, -1/60 per pass)
+7100bb7a30 L_7100bb83bc fs v1 combo/HUD result hold timer #3 (0.167s, -1/60 per pass)
+7100c8fa98 L_7100c8fb88 fs    ComboRow +400 timer/fade-out countdown (-1/60 per pass)
+7100c907c4 L_7100c90964 fs    ComboTotal +416 score bank tally countdown (-1/60 per pass)
+7100c90c48 L_7100c90ccc fs v1 ComboTotal +400 score roll-up timer (0.1s, -1/60 per pass)
+710018db5c L_710018e184 fs    +0x89e8 float countdown (-1/60 per pass)
+7100766208 L_71007662e8 fs    +1472 float countdown (-1/60 per pass)
+7100c5ba64 L_7100c5bc58 fs v1 UI +1480 countdown (-1/60 per pass)
+7100c5f924 L_7100c5fa84 fs v1 UI +1944 countdown (-1/60 per pass)
+7100cbd828 L_7100cbd8c4 fs    UI +372 countdown (-1/60 per pass)
+7100cdebac L_7100cdee6c fs    UI +372 countdown (-1/60 per pass)
+7100cdf838 L_7100cdf87c fs    UI +420 countdown (-1/60 per pass)
+7100ce5af4 L_7100ce5bb8 fs v1 UI +1932 countdown (-1/60 per pass)
+7100ceae80 L_7100ceaec0 fs    UI +1924 countdown (-1/60 per pass)
+7100cf0edc L_7100cf0f4c fs v8 UI +1900 countdown (-1/60 per pass)
+7100cf4f68 L_7100cf502c fs    UI +2972 countdown (-1/60 per pass)
+7100cfb490 L_7100cfb4d8 fs    UI +2964 countdown (-1/60 per pass)
+7100cfbad4 L_7100cfbb10 fs    UI +2964 countdown (-1/60 per pass)
+7100d0828c L_7100d083c0 fs    UI +0x44e4 countdown (-1/60 per pass)
+7100d68e6c L_7100d690e8 fs    +340 timer (+1/60 per pass)
+# Chapter Select 3D Card & UI animations (smooth fractional step)
+7100601964 L_7100601998 fsop       Chapter Select Card +1456 idle bobbing phase (+1.0, wraps at 80.0)
+7100601cac L_7100601cdc fs         Chapter Select Card bone +128 tilt-close (-5 deg/frame)
+7100601d28 L_7100601d58 fs         Chapter Select Card bone +128 tilt-open (+5 deg/frame)
+7100601da4 L_7100601ed0 fsop v1 x19 Chapter Select Card bone +132 spin rotation (+/-0.20 rad/frame)
+7100601da4 L_7100601f0c fsop       Chapter Select Card +1444 highlight fade-in (+0.05/frame)
+7100602204 L_710060227c fsop       Chapter Select Card +1444 highlight fade-out (-0.05/frame)
+7100bbb0d8 L_7100bbb270 fs         UI +192 animation frame counter (+1.0 per pass)
+7100c57028 L_7100c571b4 fs         UI +1612 repeat timer (-1.0 per pass, reloaded with 24.0)
+7100ce3ab0 L_7100ce3ce4 fs         UI +340 continuous animation phase (wraps mod 3*v1)
