@@ -2,14 +2,13 @@
  * BGRA pixels on the CPU when its content changes; here they are copied over the presented picture (after the game's frame, the
  * bars and the first-run text: never into the game's textures), at the size of the window.
  *   - The GPU path (pcm_gpu_*): the panel and the first-start screen are composed on the GPU every frame: the ground pcmenu.c
- *     drew (once a version) is copied into a canvas of the panel's size, the moving parts (the wheels' rings and gears, the
- *     hands) are drawn over it as turned textured quads from pcmenu_gpu_scene, with the hubs and the words (layers pcmenu.c
- *     drew once a version) between, and the canvas is copied over the picture. The art is 16 textures uploaded once.
- *     While the panel opens or closes, the canvas starts instead from the game's picture under it (when it can be read:
- *     the swapchain images with TRANSFER_SRC, or the HDR picture) and the whole panel is sprites over it (the ground and a
- *     flat pearl as textures too), so the wedge can slide in and the rows step in. pcmenu.c then never draws a frame for
- *     the turning wheel; MR_PCMENU_CPU=1 keeps the CPU path (the fallback when the pipeline cannot be made; it has no
- *     opening or closing motion).
+ *     drew (once a version) is copied into a canvas of the panel's size, the moving parts (the rotating celestial lunar ring,
+ *     drawer scrim and edge glow) are drawn over it as turned textured quads from pcmenu_gpu_scene, with the words layer
+ *     (drawn once a version) over it, and the canvas is copied over the picture. The procedural art is uploaded once.
+ *     While the panel is open over the game (when the frame can be read: swapchain images with TRANSFER_SRC, or HDR), the canvas
+ *     starts from the game's picture under it and the Moon River drawer is drawn as sprites over it, sliding cleanly in from the
+ *     right with a dimmed backdrop scrim and staggered rows. MR_PCMENU_CPU=1 keeps the CPU path (fallback when the pipeline
+ *     cannot be made; it has no opening or closing motion).
  *   - nvn_vk_pcmenu_job: a job of the render thread that pcmenu.c posts about 60 times a second while the menu holds the game:
  *     the work the menu asks for (a sampler flush for anisotropic filtering / texture detail, the present mode for vsync, the images and stages of a new resolution scale), the panel's pixels
  *     into a staging buffer when they changed, then the game's last picture presented again with the panel (vk_present2's
@@ -28,7 +27,7 @@ typedef struct {                                   /* as pcmenu.c */
 } PcmSprite;
 void pcmenu_gpu(int on); int pcmenu_gpu_scene(int W, int H, PcmSprite *out, int max, int *over_game);
 void *pcmenu_art_pixels(int id, int *w, int *h); int pcmenu_layer_read(int which, void *dst, int w, int h);
-#define PCM_NART 17                                /* pcmenu_art_pixels' ids: 16 pieces of art and a flat pearl (16) */
+#define PCM_NART 3                                 /* pcmenu_art_pixels' ids: 0 scrim, 1 outer edge shadow+glow, 2 celestial lunar ring */
 #define PCM_NTEX (PCM_NART + 3)                    /* then the hubs layer, the words layer and the ground, of the canvas's size */
 #define PCM_NSPR 64
 typedef struct { VkImage img; VMem mem; VkImageView view; VkDescriptorSet set; int w, h, ready; } PcmTex;      /* ready: it holds pixels the shaders may read */
@@ -48,9 +47,9 @@ static struct { VkBuffer buf; VMem mem; uint64_t size; int w, h, pending, n, sai
 /* ---- the GPU path ---- */
 /* One pipeline draws every sprite: a quad of half size h about the centre c, turned by rot (cos, sin), its texture
  * premultiplied, at the opacity alpha, over the canvas (ONE, ONE_MINUS_SRC_ALPHA, as pcmenu.c's put_pre); the fragment
- * stage keeps the ring ann (inner and outer radius, in pixels; none when the outer is 0), the side of the slanted edge
- * (clip.x + y * tan 22, the same integer edge as art_blit's; clip.y: 0 all, 1 left of it, -1 right of it), the side of a
- * second such edge (clip2), and the band of rows band.x <= y < band.y (none when band.y <= band.x). */
+ * stage keeps the ring ann (inner and outer radius, in pixels; none when the outer is 0), the side of the vertical edge
+ * clip.x (clip.y: 0 all, 1 left of it, -1 right of it), the side of a second such edge (clip2), and the band of rows
+ * band.x <= y < band.y (none when band.y <= band.x). */
 static const char k_pcm_vs[] =
     "#version 460\n"
     "layout(push_constant) uniform PC { vec2 c; vec2 h; vec2 rot; vec2 view; vec2 ann; vec2 clip; vec2 clip2; vec2 band; float alpha; float pad; } pc;\n"
@@ -73,8 +72,8 @@ static const char k_pcm_fs[] =
     "    if (pc.ann.y > 0.0) { float rr = dot(d, d); if (rr < pc.ann.x * pc.ann.x || rr > pc.ann.y * pc.ann.y) discard; }\n"
     "    float x = floor(gl_FragCoord.x), y = floor(gl_FragCoord.y);\n"
     "    if (pc.band.y > pc.band.x && (y < pc.band.x || y >= pc.band.y)) discard;\n"
-    "    if (pc.clip.y != 0.0) { float e = floor(pc.clip.x + y * 0.4040); if (pc.clip.y > 0.0 ? x >= e : x < e) discard; }\n"
-    "    if (pc.clip2.y != 0.0) { float e = floor(pc.clip2.x + y * 0.4040); if (pc.clip2.y > 0.0 ? x >= e : x < e) discard; }\n"
+    "    if (pc.clip.y != 0.0) { float e = floor(pc.clip.x); if (pc.clip.y > 0.0 ? x >= e : x < e) discard; }\n"
+    "    if (pc.clip2.y != 0.0) { float e = floor(pc.clip2.x); if (pc.clip2.y > 0.0 ? x >= e : x < e) discard; }\n"
     "    o_col = texture(u_pic, v_uv) * pc.alpha;\n"
     "}\n";
 typedef struct { float c[2], h[2], rot[2], view[2], ann[2], clip[2], clip2[2], band[2], alpha, pad; } PcmPush;
@@ -253,7 +252,7 @@ static void pcm_gpu_draw(VkImage tgt, const int r[4]) {
     for (int i = 0; i < n; i++) {
         const PcmSprite *s = &sp[i];
         PcmTex *t = s->art >= 0 && s->art < PCM_NART ? &g_gpu.tex[s->art] : s->art == -1 ? &g_gpu.tex[PCM_NART] : s->art == -2 ? &g_gpu.tex[PCM_NART + 1]
-                  : s->art == -3 ? &g_gpu.tex[PCM_NART + 2] : s->art == -4 ? &g_gpu.tex[PCM_NART - 1] : NULL;
+                  : s->art == -3 ? &g_gpu.tex[PCM_NART + 2] : NULL;
         if (!t || !t->ready) continue;
         float a = s->deg * 3.14159265f / 180;
         PcmPush pc = {{s->x + s->w / 2, s->y + s->h / 2}, {s->w / 2, s->h / 2}, {cosf(a), sinf(a)}, {(float)r[2], (float)r[3]},
