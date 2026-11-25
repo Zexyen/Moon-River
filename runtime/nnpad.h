@@ -24,6 +24,7 @@ int  nnpad_present(int player);                  /* a device is assigned to this
 int  nnpad_get(int player, NnPadState *out);     /* 0 = none */
 void nnpad_rumble(int player, float low, float high);   /* amplitudes 0..1 of the low and high band */
 void nnpad_disconnect(int player);               /* DisconnectNpad: hidden until one of its buttons is pressed */
+int  nnpad_mouse_cfg(float *sens, int *invert);  /* [Recomps#1] mouse_camera on? (+ sensitivity, invert-y) */
 int  nnpad_keyboard_player(void);                /* 0..7, -1 = nobody; fixed once resolved (see controllers.ini) */
 #define KB_N 25
 int  nnpad_kb_vk(int idx);                       /* configured virtual key: 0..15 = Pro buttons, 16..19 = left stick left/up/right/down, 20..23 = right stick, 24 = walk; 0 = unbound */

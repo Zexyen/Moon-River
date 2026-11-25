@@ -50,6 +50,7 @@
 #include "nvn_front.h"
 #include "tex_decode.h"
 #include "tex_pack.h"
+#include "prompts.h"
 #include "nvn_sdk.h"
 #include "nvn_c4.h"
 
@@ -961,6 +962,7 @@ static void tex_upload_memory(Tex *t, const Fmt *f) {
             }
             if (need > tmp_cap) { tmp_cap = need * 2; tmp = realloc(tmp, tmp_cap); }
             tex_deswizzle_level(&L, l, p, tmp);
+            if (t->prompt_atlas > 0 && l == 0 && layer == 0) prompts_patch(t->prompt_atlas, tmp, L.lvl_w[0], L.lvl_h[0], b->format);
             if (tf && tf->sw_decode) {
                 decode_par(b->format, tmp, L.lvl_w[l], L.lvl_h[l], tmp + lin, NULL);
                 tex_put(t, &sw, l, layer, 0, 0, 0, L.lvl_w[l], L.lvl_h[l], 1, tmp + lin);
@@ -980,12 +982,24 @@ static void tex_sync(Tex *t) {
     const uint8_t *src = t->b.packaged ? P(t->b.packaged) : t->mem;
     if (t->gpu_written || !src || t->b.samples > 1 || !fmt_get(t->b.format, &f) || (f.kind >= 1 && f.kind <= 3)) return;
     if (!t->b.packaged && t->limit && src + t->data_size > t->limit) return;
-    if (t->b.packaged && t->uploaded) return;      /* packaged data is consumed once at creation */
+    if (t->b.packaged && t->uploaded) {             /* packaged data is consumed once at creation */
+        if (t->prompt_atlas > 0) {
+            uint64_t pk = prompts_state_key();
+            if (pk != t->prompt_key) { t->prompt_key = pk; goto gl_upload; }
+        }
+        return;
+    }
     LONG64 pf0 = pf_now();
     HS_IN("texture check (write watch, hash)", 0);
     uint64_t newest = ww_newest(src, t->data_size);
     if (newest) {
-        if (t->uploaded && !t->dirty && t->ww_hashed && newest <= t->ww_seen) { g_ww_clean++; pf_add(PF_TEXHASH, pf0); HS_OUT(); return; }      /* not written since the last look */
+        if (t->uploaded && !t->dirty && t->ww_hashed && newest <= t->ww_seen) {
+            if (t->prompt_atlas > 0) {
+                uint64_t pk = prompts_state_key();
+                if (pk != t->prompt_key) { t->prompt_key = pk; pf_add(PF_TEXHASH, pf0); HS_OUT(); goto gl_upload; }
+            }
+            g_ww_clean++; pf_add(PF_TEXHASH, pf0); HS_OUT(); return;      /* not written since the last look */
+        }
         t->ww_seen = newest;
         g_ww_dirty++;
     } else g_ww_unwatched++;
@@ -994,7 +1008,17 @@ static void tex_sync(Tex *t) {
     t->ww_hashed = newest != 0;                    /* t->hash is the hash of every word (needed to compare the next time) */
     pf_add(PF_TEXHASH, pf0); g_pf_hash_bytes += (LONG64)t->data_size;
     HS_OUT();
-    if (same) return;
+    if (same) {
+        if (t->prompt_atlas > 0) {
+            uint64_t pk = prompts_state_key();
+            if (pk != t->prompt_key) { t->prompt_key = pk; goto gl_upload; }
+        }
+        return;
+    }
+    t->prompt_atlas = (int8_t)prompts_identify(t->b.format, t->b.width, t->b.height, t->glevels, tex_layers(&t->b), t->data_size, src);
+    if (t->prompt_atlas > 0) t->prompt_key = prompts_state_key();
+    t->hash = h;
+gl_upload:
     while (glGetError()) {}
     pf0 = pf_now();
     { HS_IN("texture upload (deswizzle, decode, glTexSubImage)", 0); tex_upload_memory(t, &f); HS_OUT(); }
@@ -1002,7 +1026,7 @@ static void tex_sync(Tex *t) {
     GLenum e = glGetError();
     static int nlog;
     if (e) logf_limited(&nlog, 20, "nvn_gl: upload of texture %dx%d format 0x%x target %d failed with GL error 0x%x\n", t->b.width, t->b.height, t->b.format, t->b.target, e);
-    t->hash = h; t->uploaded = 1; t->dirty = 0;
+    t->uploaded = 1; t->dirty = 0;
     g_st.tex_uploads++;
 }
 
@@ -5812,11 +5836,23 @@ int nvn_front_tex_changed(Tex *t, uint32_t gen) {
     const uint8_t *src = t->b.packaged ? P(t->b.packaged) : t->mem;
     if (t->gpu_written || !src || t->b.samples > 1 || !fmt_get(t->b.format, &f) || (f.kind >= 1 && f.kind <= 3)) return 0;
     if (!t->b.packaged && t->limit && src + t->data_size > t->limit) return 0;
-    if (t->b.packaged && t->uploaded) return 0;
+    if (t->b.packaged && t->uploaded) {
+        if (t->prompt_atlas > 0) {
+            uint64_t pk = prompts_state_key();
+            if (pk != t->prompt_key) { t->prompt_key = pk; g_st.tex_uploads++; return 1; }
+        }
+        return 0;
+    }
     LONG64 pf0 = pf_now();
     uint64_t newest = ww_tex_newest(src, t->data_size, t->uploaded && !t->dirty && t->ww_hashed ? t->ww_seen : 0, &t->ww_at, gen);
     if (newest) {
-        if (t->uploaded && !t->dirty && t->ww_hashed && newest <= t->ww_seen) { g_ww_clean++; pf_add(PF_TEXHASH, pf0); texlog(src, t->data_size, gen, 0); return 0; }
+        if (t->uploaded && !t->dirty && t->ww_hashed && newest <= t->ww_seen) {
+            if (t->prompt_atlas > 0) {
+                uint64_t pk = prompts_state_key();
+                if (pk != t->prompt_key) { t->prompt_key = pk; g_st.tex_uploads++; pf_add(PF_TEXHASH, pf0); return 1; }
+            }
+            g_ww_clean++; pf_add(PF_TEXHASH, pf0); texlog(src, t->data_size, gen, 0); return 0;
+        }
         t->ww_seen = newest;
         g_ww_dirty++;
     } else g_ww_unwatched++;
@@ -5825,7 +5861,15 @@ int nvn_front_tex_changed(Tex *t, uint32_t gen) {
     t->ww_hashed = newest != 0;
     pf_add(PF_TEXHASH, pf0); g_pf_hash_bytes += (LONG64)t->data_size;
     texlog(src, t->data_size, gen, (same ? 1 : 2) | (newest ? 0 : 4));
-    if (same) return 0;
+    if (same) {
+        if (t->prompt_atlas > 0) {
+            uint64_t pk = prompts_state_key();
+            if (pk != t->prompt_key) { t->prompt_key = pk; g_st.tex_uploads++; return 1; }
+        }
+        return 0;
+    }
+    t->prompt_atlas = (int8_t)prompts_identify(t->b.format, t->b.width, t->b.height, nvn_front_tex_levels(t), nvn_front_tex_layers(t), t->data_size, src);
+    if (t->prompt_atlas > 0) t->prompt_key = prompts_state_key();
     t->hash = h; t->uploaded = 1; t->dirty = 0;
     g_st.tex_uploads++;
     return 1;
@@ -6070,6 +6114,7 @@ encode:
                 }
             }
             tex_deswizzle_level(&L, l, p, tmp);
+            if (t->prompt_atlas > 0 && l == 0 && layer == 0) prompts_patch(t->prompt_atlas, tmp, L.lvl_w[0], L.lvl_h[0], b->format);
             if (decode) {
                 unsigned bad0 = tex_astc_bad_blocks;
                 decode_par(b->format, tmp, L.lvl_w[l], L.lvl_h[l], tmp + lin, decode == 2 ? tmp + lin + rgba : NULL);      /* 3: tex_encode_bc7 below */
