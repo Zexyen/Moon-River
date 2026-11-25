@@ -16,4 +16,8 @@ int prompts_identify(int nvn_format, int w, int h, int levels, int layers, size_
 /* Patches level 0 tightly-packed texels (RGBA8 or BC3 blocks) in-place for the current prompt family / bindings. */
 void prompts_patch(int atlas_id, uint8_t *linear, int w, int h, int nvn_format);
 
+/* Keeps the game's in-game menu confirm/cancel masks and menu button-guide icons in sync with swap_confirm.
+ * Called from player 1's pad poll (nnhid.c) after device-use tracking updates. */
+void prompts_menu_swap_tick(void);
+
 #endif
