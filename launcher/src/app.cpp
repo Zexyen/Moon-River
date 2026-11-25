@@ -107,7 +107,7 @@ const std::vector<SettingDef>& setting_defs()
 		// the launcher's own (config/launcher.ini; the game never reads it): App::sound
 		{"sounds", "Launcher sounds", "Soft ticks as you move through these screens.", {{"on", "On"}, {"off", "Off"}}, 0, nullptr, "/launcher.ini"},
 		{"resolution_scale", "Internal resolution", "720p is the console's docked size.",
-			{{"0.5", "0.5 ×"}, {"0.75", "0.75 ×"}, {"1.0", "720p"}, {"1.25", "1.25 ×"}, {"1.5", "1080p"}, {"2.0", "1440p"}, {"2.5", "2.5 ×"}, {"3.0", "2160p"}},
+			{{"0.5", "360p"}, {"0.75", "540p"}, {"1.0", "720p"}, {"1.25", "900p"}, {"1.5", "1080p"}, {"2.0", "1440p"}, {"2.5", "1800p"}, {"3.0", "4K"}},
 			1, "1.0"},
 		{"hdr", "HDR", "Auto follows the desktop.", {{"auto", "Auto"}, {"off", "Off"}, {"on", "On"}}, 1},
 		{"hdr_paper_white", "HDR white", "The game's white with HDR on; Auto follows the desktop.",

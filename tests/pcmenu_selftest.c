@@ -69,6 +69,9 @@ int main(int argc, char **argv) {
     setenv("MR_GRAPHICS_CONFIG", ini, 1);
     /* a value not in a row's list (v0.5.2's 1.4, a hand-edited 16:10): the nearest one that way; none: left / right stay */
     int rs = row_of("resolution_scale"), ws = row_of("size");
+    const char *const want_rs[] = {"360p", "540p", "720p", "900p", "1080p", "1440p", "1800p", "4K"};
+    assert(row_count(rs) == 8);
+    for (int i = 0; i < 8; i++) assert(!strcmp(k_rows[rs].name[i], want_rs[i]));
     snprintf(g_raw[rs], sizeof g_raw[rs], "1.4");
     assert(!strcmp(k_rows[rs].val[nearest(rs, 1, 0)], "1.5") && !strcmp(k_rows[rs].val[nearest(rs, -1, 0)], "1.25"));
     snprintf(g_raw[rs], sizeof g_raw[rs], "9");
