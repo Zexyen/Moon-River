@@ -279,7 +279,12 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
     }
     if (f) fclose(f);
     if (!o->frame_rate) o->frame_rate = 60;
-    /* [Recomps#1] aspect = wide: the game draws at the monitor's shape, 720 high (RECOMPS_UW_WIDTH). A set variable wins.
+    {   /* [moonriver] MR_WINDOW=<w>x<h> wins over width / height (window size in the desktop's units, as the keys) */
+        const char *e = getenv("MR_WINDOW"); int w, h;
+        if (e && sscanf(e, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 180 && w <= 16384 && h <= 16384) { o->width = w; o->height = h; }
+    }
+    /* [Recomps#1] aspect = wide: the game draws at the window's shape (monitor in borderless/fullscreen, client size
+     * in windowed mode), 720 high (RECOMPS_UW_WIDTH). A set variable wins.
      * Startup only (!arg): gfx_option_set reloads on pcmenu's thread while the game window is live, where SDL video
      * init/quit is unsafe and the running game's render width cannot change mid-session. */
     if (!arg) {
@@ -289,25 +294,29 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
         if (o->wide_width < 0) {
             o->wide_width = env_w;
             if (!o->wide_width) {
-                int was_init = (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) != 0;
-                if (was_init || SDL_InitSubSystem(SDL_INIT_VIDEO)) {
-                    SDL_Window *lw = (SDL_Window *)SDL_GetPointerProperty(SDL_GetGlobalProperties(), "moonriver.window", NULL);
-                    SDL_DisplayID did = lw ? SDL_GetDisplayForWindow(lw) : 0;
-                    if (!did) did = SDL_GetPrimaryDisplay();
-                    SDL_Rect b;
-                    int dw = 0, dh = 0;
-                    if (did && SDL_GetDisplayBounds(did, &b) && b.w > 0 && b.h > 0) { dw = b.w; dh = b.h; }
-                    else if (did) { const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(did); if (dm && dm->w > 0 && dm->h > 0) { dw = dm->w; dh = dm->h; } }
-                    if (dw > 0 && dh > 0) {
-                        int w = (int)(720.0 * dw / dh + 0.5) & ~1;
-                        o->wide_width = w > 1280 ? (w > 8192 ? 8192 : w) : 0;
+                int dw = 0, dh = 0;
+                if (!o->window_mode) {
+                    dw = o->width; dh = o->height;
+                } else {
+                    int was_init = (SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) != 0;
+                    if (was_init || SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+                        SDL_Window *lw = (SDL_Window *)SDL_GetPointerProperty(SDL_GetGlobalProperties(), "moonriver.window", NULL);
+                        SDL_DisplayID did = lw ? SDL_GetDisplayForWindow(lw) : 0;
+                        if (!did) did = SDL_GetPrimaryDisplay();
+                        SDL_Rect b;
+                        if (did && SDL_GetDisplayBounds(did, &b) && b.w > 0 && b.h > 0) { dw = b.w; dh = b.h; }
+                        else if (did) { const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(did); if (dm && dm->w > 0 && dm->h > 0) { dw = dm->w; dh = dm->h; } }
+                        if (!was_init) SDL_QuitSubSystem(SDL_INIT_VIDEO);
                     }
-                    if (!was_init) SDL_QuitSubSystem(SDL_INIT_VIDEO);
+                }
+                if (dw > 0 && dh > 0) {
+                    int w = (int)(720.0 * dw / dh + 0.5) & ~1;
+                    o->wide_width = w > 1280 ? (w > 8192 ? 8192 : w) : 0;
                 }
             }
             if (o->wide_width && !env_w) { char n[16]; snprintf(n, sizeof n, "%d", o->wide_width); _putenv_s("RECOMPS_UW_WIDTH", n); }
             if (o->wide_width) printf("graphics options: aspect=wide: %dx720 (RECOMPS_UW_WIDTH%s)\n", o->wide_width, env_w ? ", from environment" : "");
-            else printf("graphics options: aspect=wide: the monitor is 16:9 or narrower, so the picture stays 16:9\n");
+            else printf("graphics options: aspect=wide: the %s is 16:9 or narrower, so the picture stays 16:9\n", o->window_mode ? "monitor" : "window");
         } else if (env_w) {
             o->wide_width = env_w;
         }
@@ -321,10 +330,6 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
         if (o->texture_lod_bias < -3.0f) o->texture_lod_bias = -3.0f;
         if (o->texture_lod_bias > 3.0f) o->texture_lod_bias = 3.0f;
         if (o->texture_lod_bias != 0.0f) printf("graphics options: texture_lod_bias=%.2f (%s): added to the mip level of every texture sampler that uses mip maps\n", o->texture_lod_bias, e ? "MR_TEXTURE_LOD_BIAS" : "graphics.ini");
-    }
-    {   /* [moonriver] MR_WINDOW=<w>x<h> wins over width / height (window size in the desktop's units, as the keys) */
-        const char *e = getenv("MR_WINDOW"); int w, h;
-        if (e && sscanf(e, "%dx%d", &w, &h) == 2 && w >= 320 && h >= 180 && w <= 16384 && h <= 16384) { o->width = w; o->height = h; }
     }
     if (!getenv("MR_MODEL_LOD")) _putenv_s("MR_MODEL_LOD", o->model_lod_high ? "highest" : "game");      /* [moonriver] read by the game library */
     else o->model_lod_high = !_stricmp(getenv("MR_MODEL_LOD"), "highest");
