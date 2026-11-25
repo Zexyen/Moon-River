@@ -40,6 +40,8 @@ int recomps_cine_end_early(Ctx *c);
 int recomps_slowmo_fix(void);
 void recomps_slowmo_timer(Ctx *c);
 int recomps_slowmo_align(Ctx *c);
+int recomps_movie_fix_on(void);
+void recomps_movie_timeout_step(Ctx *c);
 unsigned recomps_uw_width(void);
 void recomps_ach_tick(Ctx *c);
 void recomps_ach_live_eval(Ctx *c);
@@ -842,7 +844,18 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
             replace_once(ls, lab, &format!("{}\n{}", hook, lab))?;
         }
     }
-    // 3e. Frame counters (fps_ticks.txt)
+    // 3e. Movie timeout above 60 fps (B2recomp issue #63 / PR #65)
+    {
+        let fname = file_of("7100b75dc0")?;
+        load_file(&fname, &mut modified)?;
+        let ls = modified.get_mut(&fname).unwrap();
+        replace_once(
+            ls,
+            "L_7100b76288: {",
+            "if (recomps_movie_fix_on()) recomps_movie_timeout_step(c);\nL_7100b76288: {",
+        )?;
+    }
+    // 3f. Frame counters (fps_ticks.txt)
     let mut nticks = 0usize;
     let mut lin_slots = 0usize;
     for raw in FPS_TICKS_TXT.lines() {
@@ -902,7 +915,7 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
     if lin_slots > 4 {
         return Err("post_lift: more f1lin sites than fps_lin slots".into());
     }
-    // 3f. Smoothings (fps_smooth.txt)
+    // 3g. Smoothings (fps_smooth.txt)
     let mut nsmooth = 0usize;
     for raw in FPS_SMOOTH_TXT.lines() {
         let s = raw.trim();
@@ -1009,7 +1022,7 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
     }
 
     log(format!(
-        "bayonetta2 post_lift: {} files patched (event_fix 3 hooks, prompt_fix 5 stores, fps: {} counters + {} reloads in {} files + {} smoothings + clock/present/cine/slowmo, ultrawide {} sites, swap_confirm {} sites, ach_live {} sites)",
+        "bayonetta2 post_lift: {} files patched (event_fix 3 hooks, prompt_fix 5 stores, fps: {} counters + {} reloads in {} files + {} smoothings + clock/present/cine/slowmo/movie, ultrawide {} sites, swap_confirm {} sites, ach_live {} sites)",
         modified.len(),
         nticks,
         nrl,
@@ -1307,5 +1320,25 @@ mod tests {
             assert_eq!(patch_ach_live_line(lab, store, &out).unwrap(), out);
         }
         assert!(patch_ach_live_line("7100d9440c", "{ wrong }", "L_7100d9440c: return;").is_err());
+    }
+
+    #[test]
+    fn movie_timeout_hook_inserts_before_label() {
+        let mut lines: Vec<String> = vec![
+            "void f_7100b75dc0(Ctx *c) {",
+            "L_7100b76284: { float t = fnan32((float)-1.0); vzero(&c->v[1]); c->v[1].f[0] = t; }",
+            "L_7100b76288: { float t = fnan32(c->v[0].f[0] + c->v[1].f[0]); vzero(&c->v[0]); c->v[0].f[0] = t; }",
+            "}",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+        replace_once(
+            &mut lines,
+            "L_7100b76288: {",
+            "if (recomps_movie_fix_on()) recomps_movie_timeout_step(c);\nL_7100b76288: {",
+        )
+        .unwrap();
+        assert!(lines[2].starts_with("if (recomps_movie_fix_on()) recomps_movie_timeout_step(c);\nL_7100b76288: {"));
     }
 }
