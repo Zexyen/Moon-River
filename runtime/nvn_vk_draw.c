@@ -5192,8 +5192,10 @@ static int uw_fx_begin(const Cmd *m, int indexed) {
         if (!f && ns < 4096 && q[28] == 0 && q[29] == 0 && q[31] == 1.0f) { strcpy(seen[ns++], kk); printf("UWFX f%lld %s\n", nvn_front_frame_next(), kk); }
     }
     float W = (float)g_rs_bw;
-    if (q[16] == 0 || q[21] == 0 || W < 1281.0f || fabsf(q[28]) > 1e-4f || fabsf(q[29]) > 1e-4f || q[31] <= 1e-4f) return 0;
-    if (fabsf(q[17]) > 1e-4f * q[31] || fabsf(q[20]) > 1e-4f * q[31]) return 0;
+    if (W < 1281.0f || fabsf(q[28]) > 1e-4f || fabsf(q[29]) > 1e-4f || q[31] <= 1e-4f) return 0;
+    int axis = q[16] != 0 && q[21] != 0 && fabsf(q[17]) <= 1e-4f * q[31] && fabsf(q[20]) <= 1e-4f * q[31];
+    int ortho2d = fabsf(q[30]) <= 1e-4f && fabsf(q[31] - 1.0f) < 1e-4f && fabsf(q[18]) <= 1e-4f && fabsf(q[22]) <= 1e-4f;
+    if (!axis && !(ortho2d && (fabsf(q[16]) + fabsf(q[17]) > 1e-4f) && (fabsf(q[20]) + fabsf(q[21]) > 1e-4f))) return 0;
     if (R.vstream[0].stride != 32 || (R.vattr[0] & 0xff) != 0x2e || (R.vattr[5] & 0xff) != 0x2e || !R.vbuf[0].addr) return 0;
     uint64_t lo, hi;
     if (!uw_vrange(m, indexed, &lo, &hi) || hi - lo > 1024 || hi * 32 > R.vbuf[0].size) return 0;
@@ -5206,12 +5208,21 @@ static int uw_fx_begin(const Cmd *m, int indexed) {
         float y = (q[20] * v[0] + q[21] * v[1] + q[22] * v[2] + q[23]) / vw;
         if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
     }
+    if (x0 <= -0.995f && x1 >= 0.995f) return 0;
     float span = (x1 - x0) * W / 2560.0f;
     int has_scr = uw_has_screen_tex((int)(W + 0.5f));
     float ymin = has_scr ? 0.90f : 0.98f;
     if (uw_log_on() && y0 <= -ymin && y1 >= ymin) { static int n; if (n++ < 40) printf("UWFXQ f%lld vs#%d fs#%d x %.3f..%.3f y %.3f..%.3f span %.3f scr %d\n", nvn_front_frame_next(), R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1, x0, x1, y0, y1, span, has_scr); }
-    if (y0 > -ymin || y1 < ymin || fabsf(x0 + x1) > 0.06f || span < 0.85f || (x0 <= -0.995f && x1 >= 0.995f)) return 0;
-    if (fabsf(q[31] - 1.0f) < 1e-4f && q[0] == 1.0f && q[1] == 1.0f && q[2] == 1.0f && fabsf(q[21] - 2.0f) < 1e-4f && fabsf(q[19] * W - 1280.0f) < 1.0f && uw_is_movie_fx()) { g_uw_bars = W; return 0; }
+    float edge = 1280.0f / W;
+    int full_centered = axis && y0 <= -ymin && y1 >= ymin && fabsf(x0 + x1) <= 0.06f && span >= 0.85f;
+    int partial_16_9 = axis && ortho2d && fabsf(x0 + x1) <= 0.04f && fabsf(span - 1.0f) <= 0.03f && (y0 <= -0.95f || y1 >= 0.95f) && (y1 - y0) >= 0.45f;
+    int edge_sheet = ortho2d && y0 <= -0.98f && y1 >= 0.98f && (
+        (fabsf(x0 + edge) < 0.08f && x1 >= 0.5f) || (fabsf(x1 - edge) < 0.08f && x0 <= -0.5f) ||
+        (x0 <= -edge + 0.05f && x0 > -0.95f && x1 >= -0.10f && x1 <= 0.20f) ||
+        (x1 >= edge - 0.05f && x1 < 0.95f && x0 <= 0.10f && x0 >= -0.20f)
+    );
+    if (!full_centered && !partial_16_9 && !edge_sheet) return 0;
+    if (full_centered && fabsf(q[31] - 1.0f) < 1e-4f && q[0] == 1.0f && q[1] == 1.0f && q[2] == 1.0f && fabsf(q[21] - 2.0f) < 1e-4f && fabsf(q[19] * W - 1280.0f) < 1.0f && uw_is_movie_fx()) { g_uw_bars = W; return 0; }
     uint8_t tmp[256];
     memcpy(tmp, q, (size_t)u->size);
     float s = W / 1280.0f;
@@ -5375,9 +5386,9 @@ static void uw2d_begin(const Cmd *m, int indexed) {
             k = 0;
         } else if (wide_hud && w[3] > 1280.5f && w[3] < 1280.0f + (W - 1280.0f) * 0.25f) {
             k = 3;
-        } else if (wide_hud && !has_scr && ((x0 < 420.0f && x1 <= 560.0f && y1 <= 240.0f) || (x0 < 240.0f && x1 <= 560.0f && y0 >= 440.0f))) {
+        } else if (wide_hud && !has_scr && x1 - x0 < 900.0f && x0 < 420.0f && x1 <= 580.0f) {
             k = 0;
-        } else if (wide_hud && !has_scr && ((x0 >= 790.0f && x0 < 1279.0f) || (x0 >= 600.0f && x0 + x1 >= 1920.0f && x0 < 1279.0f))) {
+        } else if (wide_hud && !has_scr && x1 - x0 < 900.0f && ((x0 >= 790.0f && x0 < 1279.0f) || (x0 >= 600.0f && x0 + x1 >= 1920.0f && x0 < 1279.0f))) {
             k = 3;
             if (R.have_scissor && !(R.scissor[0] <= 0 && R.scissor[0] + R.scissor[2] >= (int)W)) {
                 memcpy(g_uw_sc_keep, R.scissor, sizeof g_uw_sc_keep); g_uw_sc_had = R.have_scissor; g_uw_sc = 1;
@@ -5409,7 +5420,7 @@ static void uw2d_begin(const Cmd *m, int indexed) {
             int l = (int)((W - 1280.0f) * 0.5f), sx = R.have_scissor ? R.scissor[0] : 0, sw = R.have_scissor ? R.scissor[2] : (int)W;
             int is_add = (R.blend_on & 1) && R.blend[0][1] == 2 && (R.blend[0][4] == 0 || R.blend[0][4] == 1);
             if (R.have_scissor && !(sx <= 0 && sx + sw >= (int)W)) sx += l;
-            else if (!wbased && ((x0 >= 0 && x1 <= 1280.0f) || (is_add && x0 < 1260.0f && x1 > 20.0f))) return;
+            else if (!wbased && ((x0 >= 0 && x1 <= 1280.0f) || ((is_add || x1 - x0 >= 1400.0f) && x0 < 1260.0f && x1 > 20.0f))) return;
             if (wbased) {
                 float tmp[64];
                 memcpy(tmp, o, (size_t)u[12].size);
