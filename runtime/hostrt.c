@@ -156,7 +156,7 @@ void stx_diag(Ctx *c, uint64_t a, uint64_t expected, uint64_t seen, uint64_t v, 
     }
 }
 
-/* Debug aid: WT_ICALLS=<start s>,<dur s> records every distinct (indirect call target, return address, context)
+/* Debug aid: MR_ICALLS=<start s>,<dur s> records every distinct (indirect call target, return address, context)
  * seen in that window with a count and the first x0..x2; icall_dump() prints them (boot.c, at the time limit). */
 #define ICALL_MAX 16384
 static struct { uint64_t target, lr, ctx, x0, x1, x2; long long n; } g_icall[ICALL_MAX];
@@ -168,13 +168,13 @@ static unsigned g_poke_val;
 static void icall_record(Ctx *c, uint64_t addr) {
     if (g_icall_mode < 0) {
         int s = 0, d = 0;
-        const char *e = getenv("WT_ICALLS");
+        const char *e = getenv("MR_ICALLS");
         g_icall_mode = e && sscanf(e, "%d,%d", &s, &d) == 2 && d > 0;
         g_icall_start = GetTickCount64() + (ULONGLONG)s * 1000;
         g_icall_end = g_icall_start + (ULONGLONG)d * 1000;
-        /* Experiment only (changes game DATA, never use for normal runs): WT_EXPERIMENT_POKE=<fn hex>:<off hex>=<byte hex>
+        /* Experiment only (changes game DATA, never use for normal runs): MR_EXPERIMENT_POKE=<fn hex>:<off hex>=<byte hex>
          * writes that byte at x0+off each time fn is called indirectly. */
-        e = getenv("WT_EXPERIMENT_POKE");
+        e = getenv("MR_EXPERIMENT_POKE");
         if (e && sscanf(e, "%llx:%llx=%x", &g_poke_fn, &g_poke_off, &g_poke_val) == 3) { if (!g_icall_mode) g_icall_mode = 2; }
         else g_poke_fn = 0;
     }
@@ -287,7 +287,7 @@ static void dump_guest_registers(void) {
 }
 
 /* ---------------------------------------------------------------- imports */
-/* [witchtime] handlers whose name this main does not import, kept for the lifted SDK's cut calls (sdk_host_call): program
+/* [moonriver] handlers whose name this main does not import, kept for the lifted SDK's cut calls (sdk_host_call): program
  * 1 (the picture book) imports less than Bayonetta 3, and its lifted SDK code still calls e.g. SdkMutexType::Lock */
 static ImportDef *g_spare;
 static int g_spare_n, g_spare_cap;
@@ -342,18 +342,18 @@ uint64_t import_address(int sym) {
 }
 
 static int audit_strict_on(void);
-static unsigned char *g_import_open;        /* per import: 1 = an OPEN row of the fake audit (WT_STRICT=path) */
+static unsigned char *g_import_open;        /* per import: 1 = an OPEN row of the fake audit (MR_STRICT=path) */
 static void audit_path_hit(const char *list, const char *name, uint64_t from);
 /* P3: exact call counts cost two interlocked increments on shared cache lines per import call (290 million calls in a
- * 240 s battle run, from every thread). They are kept only when WT_IMPORT_COUNTS=1 or WT_AUDIT_COUNTS is set;
+ * 240 s battle run, from every thread). They are kept only when MR_IMPORT_COUNTS=1 or MR_AUDIT_COUNTS is set;
  * otherwise an import is counted (and traced) for its first three calls, as before, and then called directly. */
 static int g_import_count_all = 1;
 /* Suspension of the application, as the console's applet manager does it (suyu am/applet.cpp UpdateSuspensionStateLocked ->
- * process->Suspend); [witchtime] only the PC menu (pcmenu.c) holds the game now, not a lost focus. While g_guest_frozen is
+ * process->Suspend); [moonriver] only the PC menu (pcmenu.c) holds the game now, not a lost focus. While g_guest_frozen is
  * set every guest thread stops at its next call of, or return from, an SDK function and waits here (the console's kernel stops the threads wherever they are; a thread inside a kernel call finishes it there too). */
 volatile LONG g_guest_frozen;
 void guest_freeze_wait(void) { while (g_guest_frozen) Sleep(5); }
-/* Session 8 (track V), WT_IMPORT_WATCH=<part of an import's name>: the calls of that one import are timed, and for every
+/* Session 8 (track V), MR_IMPORT_WATCH=<part of an import's name>: the calls of that one import are timed, and for every
  * frame in which they took more than 2 ms a line says how many there were, what they cost, the slowest one (with the text
  * its third argument points at when it is a printable string: the format of a formatting function) and how many different
  * return addresses called it. Off: one compare per import call. */
@@ -361,7 +361,7 @@ static void host_import_real(Ctx *c, int sym);
 static int g_watch_sym = -2;
 void host_import(Ctx *c, int sym) {
     if (g_watch_sym == -2) {
-        const char *e = getenv("WT_IMPORT_WATCH");
+        const char *e = getenv("MR_IMPORT_WATCH");
         int w = -1;
         if (e && e[0]) for (int i = 0; i < (int)dyn_sym_count; i++) if (strstr(dyn_syms[i].name, e)) { w = i; break; }
         if (w >= 0) printf("import_watch: watching \"%s\"\n", dyn_syms[w].name);
@@ -433,7 +433,7 @@ static void host_import_real(Ctx *c, int sym) {
             printf("import \"%s\" was called without a handler (caller 0x%llx)\n", dyn_syms[sym].name, (unsigned long long)c->x[30] - 4);
             trace_printf("import \"%s\" called without a handler\n", dyn_syms[sym].name);
         }
-        if (audit_strict_on()) guest_trap("call to an import that has no handler (WT_STRICT)", c->x[30] - 4);
+        if (audit_strict_on()) guest_trap("call to an import that has no handler (MR_STRICT)", c->x[30] - 4);
         c->x[0] = 0;
     }
     c->in_import = saved_name;
@@ -446,7 +446,7 @@ void print_import_summary(FILE *out) {
     for (int i = 0; i < g_import_order_count; i++) { if (g_handlers[g_import_order[i]]) impl++; else stubs++; }
     fprintf(out, "\nimports reached: %d  (implemented: %d, still stubs: %d), %llu calls in total\n",
             g_import_order_count, impl, stubs, g_trace_seq);
-    if (!g_import_count_all) fprintf(out, "(call counts are off: each import is counted up to its third call only; WT_IMPORT_COUNTS=1 counts every call)\n");
+    if (!g_import_count_all) fprintf(out, "(call counts are off: each import is counted up to its third call only; MR_IMPORT_COUNTS=1 counts every call)\n");
     fprintf(out, "most called imports:\n");
     for (int k = 0; k < 14; k++) {                       /* small selection sort over the reached imports */
         int best = -1;
@@ -457,7 +457,7 @@ void print_import_summary(FILE *out) {
         fprintf(out, "  %10llu  %s%s\n", g_import_calls[g_import_order[k]], dyn_syms[g_import_order[k]].name,
                 g_handlers[g_import_order[k]] ? "" : "   (stub)");
     }
-    if (getenv("WT_IMPORT_COUNTS") && atoi(getenv("WT_IMPORT_COUNTS")) >= 2) {      /* D2 debug aid: every reached import with its count */
+    if (getenv("MR_IMPORT_COUNTS") && atoi(getenv("MR_IMPORT_COUNTS")) >= 2) {      /* D2 debug aid: every reached import with its count */
         fprintf(out, "all import counts:\n");
         for (int i = 0; i < g_import_order_count; i++) fprintf(out, "  count %10llu  %s\n", g_import_calls[g_import_order[i]], dyn_syms[g_import_order[i]].name);
     }
@@ -473,7 +473,7 @@ void print_devinfo_summary(FILE *out);       /* nvn_stub.c */
 void display_report(FILE *out);              /* display.c */
 
 void audio_report(FILE *out);                /* nnaudio.c: underruns of the run */
-void hid_report(FILE *out);                  /* nnhid.c: synthetic XInput pad (WT_XINPUT_SYNTH) */
+void hid_report(FILE *out);                  /* nnhid.c: synthetic XInput pad (MR_XINPUT_SYNTH) */
 void os_thread_report(FILE *out);            /* os_threads.c: every thread the game created, with its nn::os arguments */
 
 
@@ -532,7 +532,7 @@ static void crash_signal(int sig, siginfo_t *si, void *uc) {
 #ifdef __APPLE__
         if (!g && i < 16) { Dl_info di; if (dladdr(pcs[i], &di) && di.dli_sname) printf("  host %p %s+0x%lx\n", pcs[i], di.dli_sname, (unsigned long)((uintptr_t)pcs[i] - (uintptr_t)di.dli_saddr)); else printf("  host %p\n", pcs[i]); }
 #else
-        if (!g && i < 16) printf("  host %p\n", pcs[i]);   /* addr2line -e witch-time-game / game.so */
+        if (!g && i < 16) printf("  host %p\n", pcs[i]);   /* addr2line -e moon-river-game / game.so */
 #endif
     }
     report_and_exit(4);
@@ -625,7 +625,7 @@ static LONG WINAPI crash_filter(EXCEPTION_POINTERS *ep) {
 /* #136: the lifted code (game.dll / game.so, about 150 MB) is paged in from disk the first time each path runs. On a hard
  * disk a first cutscene stopped for seconds: the game's thread used no CPU and sat at the first instruction of one function
  * after another. A thread reads the whole library ahead at start in large I/O, then touches the lifted functions' pages
- * (that waits for the reads, so the log line measures the disk). WT_CODE_PREFETCH=0: off. */
+ * (that waits for the reads, so the log line measures the disk). MR_CODE_PREFETCH=0: off. */
 #ifndef _WIN32
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -667,7 +667,7 @@ void runtime_init(const char *elf, const char *trace_path) {
     memcpy(g_by_host, fn_table, (size_t)fn_table_count * sizeof *g_by_host);
     qsort(g_by_host, (size_t)fn_table_count, sizeof *g_by_host, cmp_host);
     fn_hash_build();
-    {   const char *e = getenv("WT_IMPORT_COUNTS"), *a = getenv("WT_AUDIT_COUNTS");
+    {   const char *e = getenv("MR_IMPORT_COUNTS"), *a = getenv("MR_AUDIT_COUNTS");
         g_import_count_all = (e && e[0] && e[0] != '0') || (a && a[0]); }
     {   /* sanity: host code addresses must be strictly increasing after the sort */
         int bad = 0;
@@ -720,12 +720,12 @@ void runtime_init(const char *elf, const char *trace_path) {
     /* close5: page protection as the loader sets it on the console: the text and read-only data segments (program headers of
      * main.elf: R-X 0x0..0x39c7e90, R-- 0x39c8000..0x4f15f60; the data segment starts at 0x4f16000) become read-only once the
      * relocations are applied (all of them land in the data segment: the image would not load on the console otherwise), so a
-     * wild write into code or constants faults instead of corrupting silently. WT_NO_PROTECT=1 leaves the old mapping. */
-    if (!getenv("WT_NO_PROTECT")) {
+     * wild write into code or constants faults instead of corrupting silently. MR_NO_PROTECT=1 leaves the old mapping. */
+    if (!getenv("MR_NO_PROTECT")) {
         if (!plat_protect((void *)GUEST_BASE, GUEST_RO_END, PLAT_RO)) { fprintf(stderr, "cannot protect the image's text and read-only data\n"); exit(1); }
         printf("image protection: 0x%llx..0x%llx read-only (text, read-only data), data and bss read-write\n", GUEST_BASE, GUEST_BASE + GUEST_RO_END);
     }
-    {   const char *e = getenv("WT_CODE_PREFETCH");      /* after the image read: on a hard disk the two would take turns */
+    {   const char *e = getenv("MR_CODE_PREFETCH");      /* after the image read: on a hard disk the two would take turns */
         HANDLE t = fn_table_count && !(e && !atoi(e)) ? CreateThread(NULL, 0, code_prefetch, NULL, 0, NULL) : NULL;
         if (t) CloseHandle(t); }
 }
@@ -735,19 +735,19 @@ void runtime_init(const char *elf, const char *trace_path) {
  * return: the generic ret0 / nothing / ret1 handlers, and every handler with a name of its own whose body is
  * the same thing. The test looks at the compiled code, so it does not depend on what a handler is called or
  * on which source file it lives in.
- *   WT_STRICT=1        any import or run-time host function (vtable slot, NVN entry) bound to a trivial
+ *   MR_STRICT=1        any import or run-time host function (vtable slot, NVN entry) bound to a trivial
  *                        handler that the audit does not white-list as CORRECT-BY-SEMANTICS, and any function
  *                        import without a handler, stops the program with a list (exit code 5).
- *   WT_STRICT=report   same list, without stopping.
- *   WT_STRICT=path     the check of the PATH that is played: nothing stops at start-up; the program stops (exit code 5)
+ *   MR_STRICT=report   same list, without stopping.
+ *   MR_STRICT=path     the check of the PATH that is played: nothing stops at start-up; the program stops (exit code 5)
  *                        at the first CALL of an import or run-time host function whose audit row is open (FAKE, WRONG or
  *                        unclassified in plan\fake_audit.csv -- every open row, not only the do-nothing bodies; list
- *                        generated into fake_openlist.h by tools_audit\fake_census.py). WT_STRICT=pathreport lists the
- *                        calls without stopping. A run to the battle that ends by its time limit under WT_STRICT=path
+ *                        generated into fake_openlist.h by tools_audit\fake_census.py). MR_STRICT=pathreport lists the
+ *                        calls without stopping. A run to the battle that ends by its time limit under MR_STRICT=path
  *                        called no fake function.
- *   WT_AUDIT_DUMP=<f>  write every import and its binding (handler RVA, trivial kind) to <f> after the
+ *   MR_AUDIT_DUMP=<f>  write every import and its binding (handler RVA, trivial kind) to <f> after the
  *                        registrations and exit: input of tools_audit\fake_census.py.
- *   WT_AUDIT_COUNTS=<f> at exit, write the call count of every import and run-time host function. */
+ *   MR_AUDIT_COUNTS=<f> at exit, write the call count of every import and run-time host function. */
 #include "fake_whitelist.h"
 #include "fake_openlist.h"
 
@@ -800,7 +800,7 @@ static int g_strict = -1;                  /* 0 off, 1 stop, 2 report, 3 path (s
 static int g_audit_started, g_audit_hostfn_bad;   /* before audit_startup, host-function findings are only counted, so the whole list is printed */
 static int audit_mode(void) {
     if (g_strict < 0) {
-        const char *e = getenv("WT_STRICT");
+        const char *e = getenv("MR_STRICT");
         g_strict = !e || !e[0] || !strcmp(e, "0") ? 0 : !strcmp(e, "report") ? 2 : !strcmp(e, "path") ? 3 : !strcmp(e, "pathreport") ? 4 : 1;
     }
     return g_strict;
@@ -822,7 +822,7 @@ static void audit_path_hit(const char *list, const char *name, uint64_t from) {
     InterlockedIncrement(&g_audit_path_hits);
     printf("STRICT(path): %s \"%s\" was called (from 0x%llx) and its audit row is open (plan\\fake_audit.csv)\n", list, name, (unsigned long long)from);
     trace_printf("STRICT(path): %s \"%s\" called, audit row open\n", list, name);
-    if (g_strict == 3) { printf("STRICT(path): stopping (WT_STRICT=pathreport lists the calls without stopping)\n"); fflush(stdout); report_and_exit(5); }
+    if (g_strict == 3) { printf("STRICT(path): stopping (MR_STRICT=pathreport lists the calls without stopping)\n"); fflush(stdout); report_and_exit(5); }
 }
 static void audit_describe(char *buf, size_t size, int kind, long long x0, int sets) {
     if (kind == 1) snprintf(buf, size, "empty body");
@@ -841,7 +841,7 @@ static void audit_hostfn(const char *name, ImportFn fn) {
     printf("STRICT: run-time host function \"%s\" is bound to a do-nothing handler (%s) that the audit does not white-list\n", name, what);
     trace_printf("STRICT: run-time host function \"%s\": %s\n", name, what);
     g_audit_hostfn_bad++;
-    if (g_strict == 1 && g_audit_started) { printf("STRICT: stopping (WT_STRICT=report lists everything without stopping)\n"); fflush(stdout); ExitProcess(5); }
+    if (g_strict == 1 && g_audit_started) { printf("STRICT: stopping (MR_STRICT=report lists everything without stopping)\n"); fflush(stdout); ExitProcess(5); }
 }
 
 static void audit_write(const char *path, int with_counts) {
@@ -867,13 +867,13 @@ static void audit_write(const char *path, int with_counts) {
 }
 
 static void audit_exit_counts(void) {
-    const char *p = getenv("WT_AUDIT_COUNTS");
+    const char *p = getenv("MR_AUDIT_COUNTS");
     if (p && p[0]) audit_write(p, 1);
 }
 
 /* Called by boot.c after the last registration. */
 void audit_startup(void) {
-    const char *dump = getenv("WT_AUDIT_DUMP");
+    const char *dump = getenv("MR_AUDIT_DUMP");
     int bad = 0, trivial = 0, listed = 0, unbound = 0;
     for (int i = 0; i < dyn_sym_count; i++) {
         long long x0; int sets, kind;
@@ -896,7 +896,7 @@ void audit_startup(void) {
         if (audit_mode() == 1 || audit_mode() == 2) { audit_describe(what, sizeof what, kind, x0, sets); printf("STRICT: import \"%s\" is bound to a do-nothing handler (%s)\n", name, what); }
     }
     printf("fake audit: %d imports bound to do-nothing handlers, %d without handler or data; %d white-listed as correct by semantics, %d NOT white-listed%s\n",
-           trivial, unbound, listed, bad, audit_mode() ? "" : " (WT_STRICT=1 lists them and stops)");
+           trivial, unbound, listed, bad, audit_mode() ? "" : " (MR_STRICT=1 lists them and stops)");
     if (dump && dump[0]) { audit_write(dump, 0); fflush(stdout); ExitProcess(0); }
     if (audit_mode() >= 3) {
         int open_n = 0;

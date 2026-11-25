@@ -13,7 +13,7 @@ typedef struct {
     void (*guest_unimpl)(uint64_t, uint32_t, const char *);
     void (*guest_svc)(Ctx *, uint32_t);
     void (*stx_diag)(Ctx *, uint64_t, uint64_t, uint64_t, uint64_t, int);
-    void (*sdk_dispatch)(Ctx *, uint64_t);           /* [witchtime] for gen/sdklift_gen.c, which is in the game library now */
+    void (*sdk_dispatch)(Ctx *, uint64_t);           /* [moonriver] for gen/sdklift_gen.c, which is in the game library now */
     void (*sdk_host_call)(Ctx *, int);
     void (*sdk_trap_call)(Ctx *, const char *);
 } GameHost;
@@ -34,14 +34,14 @@ void guest_unimpl(uint64_t pc, uint32_t insn, const char *what) { host.guest_uni
 void guest_svc(Ctx *c, uint32_t number) { host.guest_svc(c, number); }
 void stx_diag(Ctx *c, uint64_t a, uint64_t expected, uint64_t seen, uint64_t v, int bits) { host.stx_diag(c, a, expected, seen, v, bits); }
 #ifdef _WIN32
-/* [witchtime] the lifted sdk (gen/sdklift_gen.c) is linked into game.dll with the player's other tables (runtime/split);
+/* [moonriver] the lifted sdk (gen/sdklift_gen.c) is linked into game.dll with the player's other tables (runtime/split);
  * on Linux game.so finds these three in the runtime when it is loaded */
 void sdk_dispatch(Ctx *c, uint64_t addr) { host.sdk_dispatch(c, addr); }
 void sdk_host_call(Ctx *c, int index) { host.sdk_host_call(c, index); }
 void sdk_trap_call(Ctx *c, const char *name) { host.sdk_trap_call(c, name); }
 #endif
-#ifdef WT_GAME_NOSTDLIB
-/* [witchtime] game.dll as wtbuild links it on the player's PC: without the C runtime's start-up code (-nostdlib), so its
+#ifdef MR_GAME_NOSTDLIB
+/* [moonriver] game.dll as mrbuild links it on the player's PC: without the C runtime's start-up code (-nostdlib), so its
  * entry point is this; nothing in it needs initialising (no constructors, no thread-local data) */
 int __stdcall DllMainCRTStartup(void *module, unsigned long reason, void *reserved) {
     (void)module; (void)reason; (void)reserved;
@@ -52,12 +52,12 @@ int __stdcall DllMainCRTStartup(void *module, unsigned long reason, void *reserv
 #if defined(__x86_64__)
 #include "soft_fmaf.h"
 #include <stdlib.h>
-/* [witchtime] every fmaf call of the lifted code (soft_fmaf.h). Hidden: on ELF a call from inside game.so would otherwise go to the C
- * library's. WT_NO_FMA3=1 (test): the path of a CPU without FMA3 on one that has it. */
+/* [moonriver] every fmaf call of the lifted code (soft_fmaf.h). Hidden: on ELF a call from inside game.so would otherwise go to the C
+ * library's. MR_NO_FMA3=1 (test): the path of a CPU without FMA3 on one that has it. */
 __attribute__((visibility("hidden"))) float fmaf(float x, float y, float z) {
     static int hw = -1;     /* whichever thread comes first sets it, each to the same value */
-    if (hw < 0) hw = wt_has_fma3() && !getenv("WT_NO_FMA3");
-    return hw ? wt_fmaf_hw(x, y, z) : wt_fmaf_soft(x, y, z);
+    if (hw < 0) hw = mr_has_fma3() && !getenv("MR_NO_FMA3");
+    return hw ? mr_fmaf_hw(x, y, z) : mr_fmaf_soft(x, y, z);
 }
 #endif
 

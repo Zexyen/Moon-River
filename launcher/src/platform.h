@@ -12,16 +12,16 @@
 #define APP_ID "moon-river"
 #define UPDATE_REPO "Zexyen/Moon-River"
 // this program's file name, in build/ and (a release) at the top of the folder
-#define LAUNCHER_NAME "recomp-launcher"
+#define LAUNCHER_NAME "moon-river-launcher"
 
 #ifdef _WIN32
-#define WT_EXE ".exe"
+#define MR_EXE ".exe"
 #else
-#define WT_EXE ""
+#define MR_EXE ""
 #endif
-// the files the build makes in build/ (tools/wtbuild/src/target.rs)
+// the files the build makes in build/ (tools/mrbuild/src/target.rs)
 #define BUILT_VERSION "built_version"    // in build/: the launcher release that last finished a build
-inline const char* const GAME_EXE = "witch-time-game" WT_EXE;
+inline const char* const GAME_EXE = "moon-river-game" MR_EXE;
 #ifdef _WIN32
 inline const char* const GAME_LIB = "game.dll";
 #elif defined(__APPLE__)

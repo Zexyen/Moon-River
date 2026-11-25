@@ -4,10 +4,10 @@
  * MOUNT TABLE. A path is "name:/dir/file"; the name must have been mounted, as in the SDK's own mount table
  * ([sdk 0x1f4960] MountTable::Find: an unknown name is fs NotMounted 0x35f202; mounting a name twice is
  * MountNameAlreadyExists 0x7802). Mount kinds and their host folders:
- *   MountRom           -> %WT_ROMFS% or ..\romfs                  (the game's extracted romfs, update applied; read-only)
+ *   MountRom           -> %MR_ROMFS% or ..\romfs                  (the game's extracted romfs, update applied; read-only)
  *   MountSaveData      -> <userdata>\save                           (journaled, see below)
  *   MountCacheStorage  -> <userdata>\cache                          (journaled like save data)
- * <userdata> is %WT_USERDATA% or ..\userdata (tests point WT_USERDATA at a copy of the user's save).
+ * <userdata> is %MR_USERDATA% or ..\userdata (tests point MR_USERDATA at a copy of the user's save).
  *
  * SAVE DATA JOURNAL. On the console, writes to save data are not permanent until nn::fs::Commit: they go to a journal,
  * Commit applies all of them together, and uncommitted writes are gone at the next mount. Here:
@@ -88,7 +88,7 @@ static void fs_unlock(void) { LeaveCriticalSection(&g_fs_lock); }
 static void rom_mods_init(void);
 static void fs_roots(void) {
     if (g_rom_root[0]) return;
-    const char *env = getenv("WT_ROMFS"), *user = getenv("WT_USERDATA");
+    const char *env = getenv("MR_ROMFS"), *user = getenv("MR_USERDATA");
     strncpy(g_rom_root, env && env[0] ? env : "..\\romfs", MAX_PATH - 1);
     strncpy(g_user_root, user && user[0] ? user : "..\\userdata", MAX_PATH - 1);
     CreateDirectoryA(g_user_root, NULL);
@@ -119,11 +119,11 @@ static void remove_tree(const char *dir) {
     RemoveDirectoryA(dir);
 }
 
-/* ---- [Recomps#1] RomFS mods: the emulators' LayeredFS. A mod is a folder directly under the mods folder (%WT_MODS%,
- * else <exe folder>\..\mods; WT_MODS=none turns them off) that holds a romfs\ folder, itself or one level down (an
+/* ---- [Recomps#1] RomFS mods: the emulators' LayeredFS. A mod is a folder directly under the mods folder (%MR_MODS%,
+ * else <exe folder>\..\mods; MR_MODS=none turns them off) that holds a romfs\ folder, itself or one level down (an
  * emulator pack's <mod>\romfs\..., or an archive unpacked into a folder of its own). Its files replace the game's file at
  * the same rom: path, or are added; the game sees them because it lists rom:/ at boot (CRI's loose files beside the CPKs).
- * Order: a mod whose name sorts later wins, as for the code mods (tools/wtbuild/src/pchtxt.rs). config\mods.ini (beside
+ * Order: a mod whose name sorts later wins, as for the code mods (tools/mrbuild/src/pchtxt.rs). config\mods.ini (beside
  * controllers.ini): [mods] <name> = off leaves a mod out; [prompts] playstation = <name> / xbox = <name> names the button
  * prompt mods (else guessed from the folder name: a word starting ds4, ds5, dualshock, dualsense, playstation, ps4, ps5 /
  * xbox, or the word ps; so DS4Prompts / XBOXPrompts of the GameBanana prompt mod 360121 need no [prompts] line). Prompt
@@ -155,8 +155,8 @@ static int mod_family(const char *name) {                /* 2 playstation, 3 xbo
     }
     return fam;
 }
-static void mods_ini_path(char *out) {                   /* beside controllers.ini (WT_CONFIG) or graphics.ini, else <exe>\..\config */
-    const char *c = getenv("WT_CONFIG"), *g = getenv("WT_GRAPHICS_CONFIG"), *f = c && c[0] ? c : g && g[0] ? g : NULL;
+static void mods_ini_path(char *out) {                   /* beside controllers.ini (MR_CONFIG) or graphics.ini, else <exe>\..\config */
+    const char *c = getenv("MR_CONFIG"), *g = getenv("MR_GRAPHICS_CONFIG"), *f = c && c[0] ? c : g && g[0] ? g : NULL;
     char tmp[MAX_PATH];
     if (f) {
         snprintf(tmp, sizeof tmp, "%s", f);
@@ -166,7 +166,7 @@ static void mods_ini_path(char *out) {                   /* beside controllers.i
         return;
     }
     GetModuleFileNameA(NULL, tmp, MAX_PATH);
-    char *s = strrchr(tmp, '\\'), *s2 = strrchr(tmp, '/');      /* [witchtime] '/' on Linux, as graphics.ini (gfx_options.c) */
+    char *s = strrchr(tmp, '\\'), *s2 = strrchr(tmp, '/');      /* [moonriver] '/' on Linux, as graphics.ini (gfx_options.c) */
     if (s2 > s) s = s2;
     if (s) *s = 0;
     snprintf(out, MAX_PATH, "%s\\..\\config\\mods.ini", tmp);
@@ -255,13 +255,13 @@ static void prompt_places_by_letter(void) {
     printf("romfs mods: the action prompt's button places follow the printed-letter layout (top Y, left X, right B, bottom A)\n");
 }
 static void rom_mods_init(void) {
-    const char *env = getenv("WT_MODS");
+    const char *env = getenv("MR_MODS");
     char dir[MAX_PATH], tmp[MAX_PATH], ini_path[MAX_PATH], pat[MAX_PATH], want[2][MAX_PATH];
     if (env && (!_stricmp(env, "none") || !strcmp(env, "0"))) return;
     if (env && env[0]) snprintf(tmp, sizeof tmp, "%s", env);
     else {
         GetModuleFileNameA(NULL, tmp, MAX_PATH);
-        char *s = strrchr(tmp, '\\'), *s2 = strrchr(tmp, '/');  /* [witchtime] '/' on Linux: build/witch-time-game/../mods was no folder */
+        char *s = strrchr(tmp, '\\'), *s2 = strrchr(tmp, '/');  /* [moonriver] '/' on Linux: build/moon-river-game/../mods was no folder */
         if (s2 > s) s = s2;
         if (s) *s = 0;
         strncat(tmp, "\\..\\mods", sizeof tmp - strlen(tmp) - 1);
@@ -312,7 +312,7 @@ static void rom_mods_init(void) {
         if (nroots < 64) snprintf(roots[nroots++], MAX_PATH, "%s", romfs);
     }
     if (prompt[0]) {
-        const char *e = getenv("WT_PROMPT_SWAP");
+        const char *e = getenv("MR_PROMPT_SWAP");
         if (!e || !e[0]) e = getenv("RECOMPS_PROMPT_SWAP");
         snprintf(g_rom_mod[g_rom_mods++], MAX_PATH, "%s", prompt);
         snprintf(g_prompt_root, sizeof g_prompt_root, "%s\\", prompt);
@@ -482,7 +482,7 @@ static int open_mode(HANDLE h, int forget) {             /* mode of an open hand
 
 /* ---- journal: commit and recovery */
 static HANDLE commit_mutex(void) {
-    HANDLE mx = CreateMutexA(NULL, FALSE, "wt_save_commit");
+    HANDLE mx = CreateMutexA(NULL, FALSE, "mr_save_commit");
     if (mx) WaitForSingleObject(mx, INFINITE);
     return mx;
 }
@@ -802,7 +802,7 @@ static void fs_OpenFile(Ctx *c) {                     /* (FileHandle *out, const
     if (InterlockedIncrement(&g_open_log) <= 200 || r || modded)     /* D2: every failed open is logged, not only the first 200 */
         trace_printf("     fs open \"%s\" mode %d -> %s%s%s\n", STR(1), (int)A2, r == RESULT_NOT_MOUNTED ? "NOT MOUNTED" : r ? "NOT FOUND" : "ok",
                      modded ? ", from the romfs mod " : "", modded ? path : "");
-    {   static int on = -1; if (on < 0) on = getenv("WT_FSLOG") != NULL;       /* D2 debug: every open on stdout */
+    {   static int on = -1; if (on < 0) on = getenv("MR_FSLOG") != NULL;       /* D2 debug: every open on stdout */
         if (on) printf("fslog: open \"%s\" mode %d -> %s\n", STR(1), (int)A2, r ? "NOT FOUND" : "ok"); }
     if (r) { wr64(A0, 0); RET(r); return; }
     open_remember(h, (int)(A2 & 7), m);
@@ -811,7 +811,7 @@ static void fs_OpenFile(Ctx *c) {                     /* (FileHandle *out, const
     RET(0);
 }
 static void fs_CloseFile(Ctx *c) { if (A0) { open_mode((HANDLE)A0, 1); prompt_swap_close((HANDLE)A0); CloseHandle((HANDLE)A0); } }
-extern int g_hitch_ms; void hitch_note(const char *s);      /* hitch.c: WT_HITCH */
+extern int g_hitch_ms; void hitch_note(const char *s);      /* hitch.c: MR_HITCH */
 static uint64_t read_at(HANDLE h, int64_t offset, void *buf, uint64_t size) {
     uint64_t total = 0;
     if (g_hitch_ms) { char note[80]; snprintf(note, sizeof note, "read of %llu KB", (unsigned long long)(size >> 10)); hitch_note(note); }
@@ -837,13 +837,13 @@ static void fs_ReadFile(Ctx *c) {                     /* (handle, offset, buffer
     if (InterlockedIncrement(&g_read_log) <= 60)
         trace_printf("     fs read offset %llx size %llx -> %llx bytes  from=%llx\n", (unsigned long long)A1,
                      (unsigned long long)A3, (unsigned long long)got, (unsigned long long)c->x[30] - 4);
-    if (got != A3 && getenv("WT_FSLOG")) printf("fslog: ReadFile SHORT handle %llx offset %llx size %llx got %llx from=%llx\n", (unsigned long long)A0, (unsigned long long)A1, (unsigned long long)A3, (unsigned long long)got, (unsigned long long)c->x[30] - 4);   /* D2 debug */
+    if (got != A3 && getenv("MR_FSLOG")) printf("fslog: ReadFile SHORT handle %llx offset %llx size %llx got %llx from=%llx\n", (unsigned long long)A0, (unsigned long long)A1, (unsigned long long)A3, (unsigned long long)got, (unsigned long long)c->x[30] - 4);   /* D2 debug */
     RET(got == A3 ? 0 : RESULT_OUT_OF_RANGE);            /* this overload must read exactly `size` bytes */
 }
 static void fs_ReadFileCount(Ctx *c) {                /* (size_t *outRead, handle, offset, buffer, size) */
     uint64_t got = read_at((HANDLE)A1, (int64_t)A2, (void *)(uintptr_t)A3, A4);
     wr64(A0, got);
-    if (got != A4 && getenv("WT_FSLOG")) printf("fslog: ReadFile(count) SHORT handle %llx offset %llx size %llx got %llx from=%llx\n", (unsigned long long)A1, (unsigned long long)A2, (unsigned long long)A4, (unsigned long long)got, (unsigned long long)c->x[30] - 4);   /* D2 debug */
+    if (got != A4 && getenv("MR_FSLOG")) printf("fslog: ReadFile(count) SHORT handle %llx offset %llx size %llx got %llx from=%llx\n", (unsigned long long)A1, (unsigned long long)A2, (unsigned long long)A4, (unsigned long long)got, (unsigned long long)c->x[30] - 4);   /* D2 debug */
     RET(0);
 }
 static void fs_WriteFile(Ctx *c) {                    /* (handle, offset, buffer, size, option) */
@@ -859,8 +859,8 @@ static void fs_WriteFile(Ctx *c) {                    /* (handle, offset, buffer
     if (A4 && (rd32(A4) & 1)) FlushFileBuffers((HANDLE)A0);                  /* WriteOption::Flush */
     RET(0);
 }
-static void fs_FlushFile(Ctx *c) { FlushFileBuffers((HANDLE)A0); RET(0); }   /* [witchtime] (handle) */
-static void fs_SetFileSize(Ctx *c) {                  /* [witchtime] (handle, size) */
+static void fs_FlushFile(Ctx *c) { FlushFileBuffers((HANDLE)A0); RET(0); }   /* [moonriver] (handle) */
+static void fs_SetFileSize(Ctx *c) {                  /* [moonriver] (handle, size) */
     LARGE_INTEGER to; to.QuadPart = (LONGLONG)A1;
     if (!(open_mode((HANDLE)A0, 0) & 2)) { RET(RESULT_WRITE_NOT_PERMITTED); return; }
     RET(SetFilePointerEx((HANDLE)A0, to, NULL, FILE_BEGIN) && SetEndOfFile((HANDLE)A0) ? 0 : RESULT_GENERIC_FAILURE);
@@ -941,7 +941,7 @@ static void fs_GetEntryType(Ctx *c) {                 /* (DirectoryEntryType *ou
 static void fs_OpenDirectory(Ctx *c) { wr64(A0, 0); RET(RESULT_PATH_NOT_FOUND); }   /* replaced by nnfsdir.c */
 static void fs_false(Ctx *c) { RET(0); }
 
-/* ---- self-test of the mount table and of the save data journal, in a scratch folder under %TEMP% (WT_SDK_SELFTEST) */
+/* ---- self-test of the mount table and of the save data journal, in a scratch folder under %TEMP% (MR_SDK_SELFTEST) */
 uint32_t fs_mount_plain(const char *name, const char *host_dir) { fs_roots(); return mount_add(name, MK_PLAIN, host_dir); }
 static int st_host_is(const char *path, const char *text) {
     char buf[64] = "";
@@ -980,7 +980,7 @@ int nnfs_selftest(Ctx *c) {
     fs_roots();
     strcpy(saved_root, g_user_root);
     GetTempPathA(MAX_PATH - 64, t);
-    snprintf(t + strlen(t), 64, "wt_fs_selftest_%lu", (unsigned long)GetCurrentProcessId());
+    snprintf(t + strlen(t), 64, "mr_fs_selftest_%lu", (unsigned long)GetCurrentProcessId());
     remove_tree(t);
     CreateDirectoryA(t, NULL);
     strcpy(g_user_root, t);
@@ -1066,20 +1066,20 @@ void acc_ListOpenUsers(Ctx *c) {
 }
 static void acc_TryOpenPreselectedUser(Ctx *c) { wr64(A0, 1); wr64(A0 + 8, 0); wr64(A0 + 16, 0); InterlockedExchange(&g_acc_user_open, 1); RET(1); }
 static void acc_GetUserId(Ctx *c) { wr64(A0, 1); wr64(A0 + 8, 0); RET(0); }
-/* [witchtime] the program switch of the picture book (issue 115): Bayonetta 3 pushes its open user before ExecuteProgram, program 1
+/* [moonriver] the program switch of the picture book (issue 115): Bayonetta 3 pushes its open user before ExecuteProgram, program 1
  * pops it at its start (or asks the user selector, or opens the user by its id): always the one local user */
 static void acc_open_handle(uint64_t h) { wr64(h, 1); wr64(h + 8, 0); wr64(h + 16, 0); InterlockedExchange(&g_acc_user_open, 1); }
 static void acc_PopOpenUsers(Ctx *c) { int program_switched_in(void); int n = (int)A2 > 0 && program_switched_in(); wr32(A0, (uint32_t)n); if (n) acc_open_handle(A1); RET(0); }
 static void acc_OpenUser(Ctx *c) { acc_open_handle(A0); RET(0); }
 static void acc_ShowUserSelector(Ctx *c) { wr64(A0, 1); wr64(A0 + 8, 0); RET(0); }
 static void acc_CloseUser(Ctx *c) { (void)c; }          /* the user stays open for the save-data checks (one user, one session) */
-/* The nickname of the console user is the name of the Windows user (WT_NICKNAME overrides): UTF-8, at most 32
+/* The nickname of the console user is the name of the Windows user (MR_NICKNAME overrides): UTF-8, at most 32
  * bytes, NUL-terminated, in the 33-byte Nickname. */
 static void acc_GetNickname(Ctx *c) {
     static char name[33];
     static volatile LONG ready;
     if (InterlockedCompareExchange(&ready, 1, 0) == 0) {
-        const char *env = getenv("WT_NICKNAME");
+        const char *env = getenv("MR_NICKNAME");
         char utf8[512] = "";
         if (env && env[0]) snprintf(utf8, sizeof utf8, "%s", env);
         else {
@@ -1119,7 +1119,7 @@ static void nifm_false(Ctx *c) { RET(0); }
 static const ImportDef fs_imports[] = {
     {FS("8MountRomEPKcPvm"), fs_MountRom}, {FS("13MountSaveDataEPKcRKNS_7account3UidE"), fs_MountSaveData},
     {FS("7UnmountEPKc"), fs_Unmount}, {FS("22QueryMountRomCacheSizeEPm"), fs_QueryMountRomCacheSize},  {FS("14EnsureSaveDataERKNS_7account3UidE"), fs_EnsureSaveData},
-    /* [witchtime] SDK 13: MountRom(name) without a cache buffer, IsSaveDataExisting(ApplicationId, Uid) of this program,
+    /* [moonriver] SDK 13: MountRom(name) without a cache buffer, IsSaveDataExisting(ApplicationId, Uid) of this program,
      * FlushFile, SetFileSize */
     {FS("8MountRomEPKc"), fs_MountRom}, {FS("18IsSaveDataExistingENS_13ApplicationIdERKNS_7account3UidE"), fs_IsSaveDataExisting},
     {FS("9FlushFileENS0_10FileHandleE"), fs_FlushFile}, {FS("11SetFileSizeENS0_10FileHandleEl"), fs_SetFileSize},
@@ -1133,7 +1133,7 @@ static const ImportDef fs_imports[] = {
     {AC("22TryOpenPreselectedUserEPNS0_10UserHandleE"), acc_TryOpenPreselectedUser},
     {AC("19OpenPreselectedUserEPNS0_10UserHandleE"), acc_OpenPreselectedUser},
     {AC("9CloseUserERKNS0_10UserHandleE"), acc_CloseUser},                                                                               /* [Recomps#1] */
-    {AC("13PushOpenUsersEv"), keep}, {AC("12PopOpenUsersEPiPNS0_10UserHandleEi"), acc_PopOpenUsers},                                  /* [witchtime] */
+    {AC("13PushOpenUsersEv"), keep}, {AC("12PopOpenUsersEPiPNS0_10UserHandleEi"), acc_PopOpenUsers},                                  /* [moonriver] */
     {AC("8OpenUserEPNS0_10UserHandleERKNS0_3UidE"), acc_OpenUser},
     {AC("16ShowUserSelectorEPNS0_3UidERKNS0_21UserSelectionSettingsE"), acc_ShowUserSelector},
     {AC("9GetUserIdEPNS0_3UidERKNS0_10UserHandleE"), acc_GetUserId}, {AC("11GetNicknameEPNS0_8NicknameERKNS0_3UidE"), acc_GetNickname},

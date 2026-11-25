@@ -1,8 +1,8 @@
 /* NVN texture storage rules answered by the SDK's own code: supports both nnSdk / NVN 3.6.0 (Bayonetta 2) and
  * nnSdk / NVN 13.3.2 (API 55.12). Same API (nvn_sdk.h); the SDK code is lifted from targets/exefs/sdk.elf by
- * tools/wtbuild/src/sdklift.rs. Every address comes from runtime/gen/nvn_sdk_addrs.h, which it writes from the player's
+ * tools/mrbuild/src/sdklift.rs. Every address comes from runtime/gen/nvn_sdk_addrs.h, which it writes from the player's
  * own sdk: NVN entry points by name from the proc table, the vtables by their typeinfo names, the format table and
- * chip descriptor by shape (tools/wtbuild/src/nvn_procs.rs gpu_model). Nothing here is a hard-coded sdk address.
+ * chip descriptor by shape (tools/mrbuild/src/nvn_procs.rs gpu_model). Nothing here is a hard-coded sdk address.
  *
  * NVN 3.6.0 vs 13.3.2 is detected from SDKA_nvnTextureBuilderGetRawStorageClass (0 in NVN 3.6.0, which has no
  * GetRawStorageClass; non-zero in NVN 13.3.2).
@@ -172,12 +172,12 @@ int nvn_sdk_format_known(uint32_t format) {
     return format < SDKA_format_count && (fmt_rec(format)[0] & 1);
 }
 
-/* Self-test (WT_SDK_SELFTEST): answers read in our sdk's disassembly, plus a sweep that must not stop anywhere
- * (every method the choosers reach must have been lifted). WT_NVN_STORAGE_TABLE=<file> writes the sweep. */
+/* Self-test (MR_SDK_SELFTEST): answers read in our sdk's disassembly, plus a sweep that must not stop anywhere
+ * (every method the choosers reach must have been lifted). MR_NVN_STORAGE_TABLE=<file> writes the sweep. */
 int nvn_sdk_selftest(Ctx *c) {
     int bad = 0, n = 0;
     NvnSdkTexBuilder b;
-    const char *out = getenv("WT_NVN_STORAGE_TABLE");
+    const char *out = getenv("MR_NVN_STORAGE_TABLE");
     FILE *f = out && *out ? fopen(out, "w") : NULL;
 #define SET(fl, tg, w_, h_, d_, lv, fm, sm) do { memset(&b, 0, sizeof b); b.flags = (fl); b.target = (tg); b.width = (w_); b.height = (h_); b.depth = (d_); b.levels = (lv); b.format = (fm); b.samples = (sm); } while (0)
 #define WANT(what, got, want) do { uint64_t g_ = (got), w_ = (want); n++; if (g_ != w_) { bad++; printf("  FAIL nvn storage %s: 0x%llx, expected 0x%llx\n", what, (unsigned long long)g_, (unsigned long long)w_); } } while (0)

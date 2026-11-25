@@ -4,8 +4,8 @@
  * functions of it that nvn_gl.c defines itself as pointers it loads (its GLF lists) get other names here. A function
  * added to those lists which Apple declares fails to compile ("redefinition as different kind of symbol", "not
  * assignable"): add it below. */
-#ifndef WT_MACOS_GL_H
-#define WT_MACOS_GL_H
+#ifndef MR_MACOS_GL_H
+#define MR_MACOS_GL_H
 #define GL_SILENCE_DEPRECATION 1
 #define glAttachShader sys_glAttachShader
 #define glBeginQuery sys_glBeginQuery

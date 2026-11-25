@@ -1,4 +1,4 @@
-/* movie:: (the SDK's video player library) on FFmpeg ([witchtime], see the FFmpeg section).
+/* movie:: (the SDK's video player library) on FFmpeg ([moonriver], see the FFmpeg section).
  *
  * The SDK library is a port of Android's stagefright (NuMediaExtractor / MediaCodec); the game's own
  * copy lives in subsdk0, whose exported symbols (movie::NnExtractor, movie::DecoderImpl, movie::NnMediaData,
@@ -62,8 +62,8 @@
  * sample to the output queue, GetOutputBuffer copies the decoded NV12 / PCM data into the game's buffer and
  * ReleaseOutputBufferIndex frees the slot.
  *
- * Environment: WT_MOVIE=0 keeps the failing placeholder (nnmovie.c); WT_MOVIE_SAVE=<file> saves what the game's
- * reader returned; WT_MOVIE_LOG=1 logs every decoder call. */
+ * Environment: MR_MOVIE=0 keeps the failing placeholder (nnmovie.c); MR_MOVIE_SAVE=<file> saves what the game's
+ * reader returned; MR_MOVIE_LOG=1 logs every decoder call. */
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -105,13 +105,13 @@ void os_signal_event(uint64_t key);                   /* os_threads.c */
 #define SLOT_BYTES 64
 #include "image_layout.h"
 #define GAME_FREE (GUEST_BASE + GAME_FREE_OFF)        /* [Recomps#1] our main's exported free, as in libcxx.c */
-/* [witchtime] B3 allocates the 16-byte Extractor / Decoder objects with its heap-aware operator new, which free()
+/* [moonriver] B3 allocates the 16-byte Extractor / Decoder objects with its heap-aware operator new, which free()
  * does not know ("not a live block" at the end of the opening movie): the deleting destructors release them with operator delete. */
 #define GAME_DELETE (GUEST_BASE + GAME_OPDELETE_OFF)
 #define TOKEN_MAGIC 0x4d4f564945544f4bULL             /* "MOVIETOK" */
 
 /* ---------------------------------------------------------------- small helpers */
-static int g_log;                                     /* WT_MOVIE_LOG */
+static int g_log;                                     /* MR_MOVIE_LOG */
 static uint64_t g_alloc_fn, g_free_fn, g_alloc_user;  /* movie::SetAllocator */
 
 /* Call a guest function with up to five arguments; the caller's registers are preserved. */
@@ -499,12 +499,12 @@ static void src_close(Ext *e) {
  * Returns 0 with a pending sample, or ST_END. Caller holds the lock. */
 static int ext_fill(Ext *e) {
     if (e->have_pending) return ST_OK;
-    {   /* TEST ONLY, WT_SKIP_MOVIES=1 (tests\DEBUG_MODE.md): every movie ends at once, as a stream with no samples left */
+    {   /* TEST ONLY, MR_SKIP_MOVIES=1 (tests\DEBUG_MODE.md): every movie ends at once, as a stream with no samples left */
         static int skip = -1;
-        if (skip < 0) { const char *v = getenv("WT_SKIP_MOVIES"); skip = v && atoi(v) != 0; }
-        static unsigned long long keep = 0;                /* WT_SKIP_MOVIES=<n>: n > 1 lets the first n samples through (default 1 = 12) */
-        if (skip > 0 && !keep) { const char *v = getenv("WT_SKIP_MOVIES"); keep = atoi(v) > 1 ? (unsigned long long)atoi(v) : 12; }
-        if (skip && e->samples_read >= keep) { if (!e->eos) printf("movie: WT_SKIP_MOVIES: end of stream after %llu samples%c", e->samples_read, 10); e->eos = 1; return ST_END; }
+        if (skip < 0) { const char *v = getenv("MR_SKIP_MOVIES"); skip = v && atoi(v) != 0; }
+        static unsigned long long keep = 0;                /* MR_SKIP_MOVIES=<n>: n > 1 lets the first n samples through (default 1 = 12) */
+        if (skip > 0 && !keep) { const char *v = getenv("MR_SKIP_MOVIES"); keep = atoi(v) > 1 ? (unsigned long long)atoi(v) : 12; }
+        if (skip && e->samples_read >= keep) { if (!e->eos) printf("movie: MR_SKIP_MOVIES: end of stream after %llu samples%c", e->samples_read, 10); e->eos = 1; return ST_END; }
     }
     if (e->eos || !e->rd) return ST_END;
     int best = -1;
@@ -513,10 +513,10 @@ static int ext_fill(Ext *e) {
         if (!tr->selected) continue;
         for (int guard = 0; !e->ahead[i].have && !tr->eos && guard < 256; guard++) {
             Sample *s = NULL; int64_t us = 0;
-            int r = src_read(e, i, &s, &us);              /* [witchtime] FFmpeg (above) */
-            {   /* test: WT_MOVIE_FAIL_AT=<n> makes the read after n samples fail */
+            int r = src_read(e, i, &s, &us);              /* [moonriver] FFmpeg (above) */
+            {   /* test: MR_MOVIE_FAIL_AT=<n> makes the read after n samples fail */
                 static int fail_at = -1;
-                if (fail_at < 0) { const char *v = getenv("WT_MOVIE_FAIL_AT"); fail_at = v ? atoi(v) : 0; }
+                if (fail_at < 0) { const char *v = getenv("MR_MOVIE_FAIL_AT"); fail_at = v ? atoi(v) : 0; }
                 if (fail_at > 0 && e->samples_read >= (unsigned long long)fail_at) { if (s) { hs_free(s); s = NULL; } r = -1; }
             }
             if (r < 0) {
@@ -557,7 +557,7 @@ static void ext_dtor(Ctx *c) { ext_dtor_common(c, 0); }
 static void ext_deleting_dtor(Ctx *c) { ext_dtor_common(c, 1); }
 
 static int ext_set_source_bytes(Ext *e, unsigned char *data, size_t size) {
-    const char *save = getenv("WT_MOVIE_SAVE");
+    const char *save = getenv("MR_MOVIE_SAVE");
     if (save) { FILE *f = fopen(save, "wb"); if (f) { fwrite(data, 1, size, f); fclose(f); printf("movie: saved %zu bytes to %s\n", size, save); } }
     int ok = ext_open_bytes(e, data, size);
     return ok ? ST_OK : ST_FAILED;
@@ -739,7 +739,7 @@ static void ext_GetBufferedRange(Ctx *c) {            /* (int64 *startUs, int64 
 static void dec_lock(Dec *d) { EnterCriticalSection(&d->cs); }
 static void dec_unlock(Dec *d) { LeaveCriticalSection(&d->cs); }
 
-static void dlog(Dec *d, const char *fmt, ...) {      /* WT_MOVIE_LOG: one line per call, with thread and time */
+static void dlog(Dec *d, const char *fmt, ...) {      /* MR_MOVIE_LOG: one line per call, with thread and time */
     if (!g_log) return;
     char line[256];
     va_list ap;
@@ -867,10 +867,10 @@ static void dec_GetOutputBufferFormat(Ctx *c) { Dec *d = dec_of(A0); MD *m = md_
  * decoder it created has arrived (cases 3 and 7 of its switch: flags + 0x4c1 and + 0x4c0), and the playback thread
  * waits for it for 5 s while holding the player's mutex: with the event sent by the video decoder only,
  * every movie start waited the full 5 s and the main thread stood at that mutex. So the real audio
- * decoder sends it as well. WT_MOVIE_NO_AUDIO_FORMAT_EVENT=1: video only, as before. */
+ * decoder sends it as well. MR_MOVIE_NO_AUDIO_FORMAT_EVENT=1: video only, as before. */
 static int fmt_event_wanted(const Dec *d) {
     static int video_only = -1;
-    if (video_only < 0) video_only = getenv("WT_MOVIE_NO_AUDIO_FORMAT_EVENT") != NULL;
+    if (video_only < 0) video_only = getenv("MR_MOVIE_NO_AUDIO_FORMAT_EVENT") != NULL;
     return (d->is_video || !video_only) && !d->fmt_signalled;
 }
 static void dec_Start(Ctx *c) {
@@ -1041,7 +1041,7 @@ static void dec_AcquireOutputBufferIndex(Ctx *c) {    /* (int *index, int64 *tim
 }
 
 /* Copies the decoded sample of slot i into the game's buffer; returns the number of bytes written. */
-static size_t copy_sample(Dec *d, OutBuf *s, unsigned char *dst, size_t cap) {      /* [witchtime] already in the game's layout */
+static size_t copy_sample(Dec *d, OutBuf *s, unsigned char *dst, size_t cap) {      /* [moonriver] already in the game's layout */
     if (!s->s || !s->s->data) return 0;
     size_t n = s->s->len < cap ? s->s->len : cap;
     if (s->s->len > cap && !d->warned_small) { d->warned_small = 1; printf("movie: game buffer of %zu bytes is smaller than a decoded %s (%zu)\n", cap, d->is_video ? "frame" : "block", s->s->len); }
@@ -1163,7 +1163,7 @@ static void decoder_ctor(Ctx *c) {                    /* Decoder(DecoderType, De
     d->type = (int)A1; d->fmt = (int)A2; d->mode = (int)A3;
     d->is_video = d->type >= 1 && d->type <= 3;
     d->nin = 8;                                       /* compressed-data buffers: only bound how far the feed runs ahead of the codec */
-    /* [witchtime] decoded frames the game may hold before the codec stalls. B3's player keeps them in a
+    /* [moonriver] decoded frames the game may hold before the codec stalls. B3's player keeps them in a
      * pool of 16 nodes; a frame acquired while the pool is empty [0x7100cd7244] is neither queued nor released, so the
      * picture stops (ev0011, which is pre-rolled while ev0010 plays and then taken in one burst: this decoder has no
      * decoding time). 16 = the pool: the codec stalls first. (SSBU's player wanted 48: over a second before its first frame.) */
@@ -1191,7 +1191,7 @@ typedef struct { const uint8_t *p; size_t n; size_t bit; } BitReader;
 
 /* ---------------------------------------------------------------- registration */
 static const ImportDef movie_mf_imports[] = {
-    {"_ZN5movie9ExtractorC1ENS_13ContainerTypeENS_9CacheSizeE", extractor_ctor},      /* [witchtime] SDK 13's form (x2 = cache size) */
+    {"_ZN5movie9ExtractorC1ENS_13ContainerTypeENS_9CacheSizeE", extractor_ctor},      /* [moonriver] SDK 13's form (x2 = cache size) */
     {"_ZN5movie7DecoderC1ENS_11DecoderTypeENS_19DecoderOutputFormatENS_11DecoderModeEi", decoder_ctor},
     {"_ZN5movie12SetAllocatorEPFPvmmS0_EPFvS0_S0_EPFS0_S0_mS0_ES0_", movie_SetAllocator},
     {"_ZN5movie11SetCoreMaskEm", movie_SetCoreMask},
@@ -1213,9 +1213,9 @@ static const ImportDef movie_mf_imports[] = {
 };
 
 void register_movie_mf_imports(void) {
-    const char *env = getenv("WT_MOVIE");
-    if (env && atoi(env) == 0) { printf("movie: WT_MOVIE=0, keeping the failing placeholder\n"); return; }
-    g_log = getenv("WT_MOVIE_LOG") != NULL;
+    const char *env = getenv("MR_MOVIE");
+    if (env && atoi(env) == 0) { printf("movie: MR_MOVIE=0, keeping the failing placeholder\n"); return; }
+    g_log = getenv("MR_MOVIE_LOG") != NULL;
     InitializeCriticalSection(&g_init_lock);
     register_imports(movie_mf_imports, (int)(sizeof movie_mf_imports / sizeof movie_mf_imports[0]));
 }

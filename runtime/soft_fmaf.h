@@ -1,11 +1,11 @@
-/* [witchtime] The lifted code's fmaf (neon.h F_MLA / F_MLS / F_RECPS / F_RSQRTS, the lifter's FMADD family), defined in the game
+/* [moonriver] The lifted code's fmaf (neon.h F_MLA / F_MLS / F_RECPS / F_RSQRTS, the lifter's FMADD family), defined in the game
  * library by game_shim.c so that those calls stay out of the C library: on a CPU without FMA3 (before Intel Haswell and
  * AMD Piledriver) the C library's fmaf is software, and the UCRT's took most of the game thread (issue 155: 6 fps on an
  * Ivy Bridge). Only game_shim.c includes this: the lifted files do not, so nobody's game compiles again for it.
  *
- * Self-test (CI runs it, wtbuild.yml): clang -O1 -DSOFT_FMAF_TEST -x c runtime/soft_fmaf.h -o t && ./t */
-#ifndef WT_SOFT_FMAF_H
-#define WT_SOFT_FMAF_H
+ * Self-test (CI runs it, mrbuild.yml): clang -O1 -DSOFT_FMAF_TEST -x c runtime/soft_fmaf.h -o t && ./t */
+#ifndef MR_SOFT_FMAF_H
+#define MR_SOFT_FMAF_H
 #if defined(__x86_64__)
 #include <stdint.h>
 #include <string.h>
@@ -16,7 +16,7 @@
  * method is FreeBSD's and musl's fmaf. x * y is exact in double, so the double sum is the one rounding, and rounding it
  * again to float can only differ from rounding the true sum when the double lies exactly half way between two floats
  * without being exact itself: then the sum's error says which neighbour the true sum is nearer to. */
-static float wt_fmaf_soft(float x, float y, float z) {
+static float mr_fmaf_soft(float x, float y, float z) {
 #pragma STDC FP_CONTRACT OFF
     double xy = (double)x * y;
     double r = xy + z, err;
@@ -31,12 +31,12 @@ static float wt_fmaf_soft(float x, float y, float z) {
 }
 
 /* the instruction itself (not __builtin_fmaf, which may compile to a call of fmaf: of this file's user) */
-__attribute__((target("fma"))) static float wt_fmaf_hw(float x, float y, float z) {
+__attribute__((target("fma"))) static float mr_fmaf_hw(float x, float y, float z) {
     return _mm_cvtss_f32(_mm_fmadd_ss(_mm_set_ss(x), _mm_set_ss(y), _mm_set_ss(z)));
 }
 
 /* FMA3, and an operating system that keeps the AVX registers (the instruction is VEX-coded) */
-static int wt_has_fma3(void) {
+static int mr_has_fma3(void) {
     unsigned a, b, c, d;
     if (!__get_cpuid(1, &a, &b, &c, &d) || (c & (1u << 12 | 1u << 27)) != (1u << 12 | 1u << 27)) return 0;    /* FMA, OSXSAVE */
     __asm__("xgetbv" : "=a"(a), "=d"(d) : "c"(0));
@@ -50,7 +50,7 @@ static uint32_t rng(void) { rng_s ^= rng_s << 13; rng_s ^= rng_s >> 7; rng_s ^= 
 static float bits(uint32_t u) { float f; memcpy(&f, &u, 4); return f; }
 static int same(float a, float b) { return a != a ? b != b : memcmp(&a, &b, 4) == 0; }
 int main(void) {
-    if (!wt_has_fma3()) { puts("soft_fmaf: no FMA3 here, nothing to compare with"); return 0; }
+    if (!mr_has_fma3()) { puts("soft_fmaf: no FMA3 here, nothing to compare with"); return 0; }
     long bad = 0, n = 0;
     for (long i = 0; i < 100000000 && bad < 10; i++, n++) {
         float x = bits(rng()), y = bits(rng()), z = bits(rng());
@@ -66,7 +66,7 @@ int main(void) {
         }
         case 6: x = bits((rng() & 0x80ffffffu) | 0x3f000000u); y = bits((rng() & 0x80ffffffu) | 0x3f000000u); z = bits((rng() & 0x80ffffffu) | 0x3f000000u); break;
         }
-        float s = wt_fmaf_soft(x, y, z), h = wt_fmaf_hw(x, y, z);
+        float s = mr_fmaf_soft(x, y, z), h = mr_fmaf_hw(x, y, z);
         if (!same(s, h)) { bad++; printf("soft_fmaf: fmaf(%a, %a, %a) = %a, the instruction gives %a\n", x, y, z, s, h); }
     }
     printf("soft_fmaf: %ld cases, %ld differ\n", n, bad);

@@ -1,6 +1,6 @@
 /* NVN on Vulkan: the second back end of the graphics layer (design, milestones, state: plan\phases\V1_vulkan.md).
  *
- * Selected with WT_RENDERER=vk (default: gl). The front end (NVN entry points, command lists, the job queue and its
+ * Selected with MR_RENDERER=vk (default: gl). The front end (NVN entry points, command lists, the job queue and its
  * render thread) is in nvn_gl.c; in Vulkan mode that render thread calls nvn_vk_init() instead of creating an OpenGL
  * context and gives its jobs to the functions below (nvn_gl.c, vk_route: seam step S0).
  *
@@ -9,13 +9,13 @@
  * the name of the operation (nvn_vk_missing), as nvn_stub.c does for a missing NVN function.
  *
  * Environment:
- *   WT_RENDERER=vk          use this back end
- *   WT_VK_SELFTEST=<n>      present n cleared frames on the display clock, print the timing, shut down, exit 0
+ *   MR_RENDERER=vk          use this back end
+ *   MR_VK_SELFTEST=<n>      present n cleared frames on the display clock, print the timing, shut down, exit 0
  *                             (exit 1 when a Vulkan call failed)
- *   WT_VK_VALIDATE=1        enable VK_LAYER_KHRONOS_validation and print its messages (says so if not installed)
- *   WT_VK_DEVICE=<i>        take physical device i of the printed list instead of the preferred one
- *   WT_VK_PRESENT=mailbox|immediate|fifo   present mode (default: mailbox, else immediate, else fifo: the pacing is ours)
- *   WT_VK_MISSING=warn      development only: an operation that is not implemented is reported once, counted and
+ *   MR_VK_VALIDATE=1        enable VK_LAYER_KHRONOS_validation and print its messages (says so if not installed)
+ *   MR_VK_DEVICE=<i>        take physical device i of the printed list instead of the preferred one
+ *   MR_VK_PRESENT=mailbox|immediate|fifo   present mode (default: mailbox, else immediate, else fifo: the pacing is ours)
+ *   MR_VK_MISSING=warn      development only: an operation that is not implemented is reported once, counted and
  *                             skipped instead of stopping the game (the picture is then NOT the game's)
  *
  * Vulkan declarations: vk_min.h (see there why it is not the Khronos header). The loader is vulkan-1.dll. */
@@ -104,7 +104,7 @@ VKF(X)
 static VkResult (VKAPI_PTR *vkEnumerateInstanceVersion)(uint32_t *);          /* absent from a Vulkan 1.0 loader */
 static VkResult (VKAPI_PTR *vkCreateDebugUtilsMessengerEXT)(VkInstance, const VkDebugUtilsMessengerCreateInfoEXT *, const VkAllocationCallbacks *, VkDebugUtilsMessengerEXT *);
 static void (VKAPI_PTR *vkDestroyDebugUtilsMessengerEXT)(VkInstance, VkDebugUtilsMessengerEXT, const VkAllocationCallbacks *);
-static PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectNameEXT;      /* WT_VK_VALIDATE: shader modules are named by program, for the layer's messages */
+static PFN_vkSetDebugUtilsObjectNameEXT vkSetDebugUtilsObjectNameEXT;      /* MR_VK_VALIDATE: shader modules are named by program, for the layer's messages */
 
 /* ---------------------------------------------------------------- state (render thread only, except the counters) */
 static struct {
@@ -150,7 +150,7 @@ static const char *vk_result_name(VkResult r) {
     snprintf(buf, sizeof buf, "VkResult %d", (int)r);
     return buf;
 }
-static void ckpt_dump(void);                       /* nvn_vk_draw.c, issue 26: WT_VK_CHECKPOINTS */
+static void ckpt_dump(void);                       /* nvn_vk_draw.c, issue 26: MR_VK_CHECKPOINTS */
 static void fault_dump(void);                      /* nvn_vk_draw.c, issue 140: VK_EXT_device_fault */
 static void vk_fatal(const char *what, VkResult r) {
     printf("nvn_vk: %s failed: %s\n", what, vk_result_name(r));
@@ -169,22 +169,22 @@ static int vk_ok(const char *what, VkResult r) {
 void nvn_vk_missing(const char *what) {
     static const char *seen[64];
     static int nseen;
-    if (g_vk_missing_warn < 0) { const char *e = getenv("WT_VK_MISSING"); g_vk_missing_warn = e && !strcmp(e, "warn"); }
+    if (g_vk_missing_warn < 0) { const char *e = getenv("MR_VK_MISSING"); g_vk_missing_warn = e && !strcmp(e, "warn"); }
     InterlockedIncrement64(&g_vk_missing_calls);
     if (!g_vk_missing_warn) {
-        printf("nvn_vk: NOT IMPLEMENTED in the Vulkan back end: %s. The game stops here (plan\\phases\\V1_vulkan.md; WT_RENDERER=gl is the working renderer).\n", what);
+        printf("nvn_vk: NOT IMPLEMENTED in the Vulkan back end: %s. The game stops here (plan\\phases\\V1_vulkan.md; MR_RENDERER=gl is the working renderer).\n", what);
         fflush(stdout);
         ExitProcess(7);
     }
     for (int i = 0; i < nseen; i++) if (seen[i] == what) return;
     if (nseen < 64) seen[nseen++] = what;
-    printf("nvn_vk: NOT IMPLEMENTED (WT_VK_MISSING=warn: skipped, the picture is not the game's): %s\n", what);
+    printf("nvn_vk: NOT IMPLEMENTED (MR_VK_MISSING=warn: skipped, the picture is not the game's): %s\n", what);
     fflush(stdout);
 }
 
 /* [Recomps#1] parameter types as in PFN_vkDebugUtilsMessengerCallbackEXT (was VkFlags, VkFlags): clang >= 16 rejects the
  * assignment below as incompatible function pointer types when the enum's type is int (MSVC target) */
-/* [witchtime] messages counted per VUID (message id name): the first 3 of each are printed, all of them in the summary at
+/* [moonriver] messages counted per VUID (message id name): the first 3 of each are printed, all of them in the summary at
  * shutdown (vk_validation_summary), most frequent first */
 static struct { char name[96]; LONG64 n; int error; } g_vuid[512];
 static int g_nvuid;
@@ -231,7 +231,7 @@ static void swapchain_destroy(void) {
     V.swapchain = NULL; V.image_count = 0;
 }
 /* Returns 0 when there is nothing to present to (a minimised window has a zero-sized surface). */
-static int g_sc_src;                                  /* [witchtime] the swapchain images can be read (TRANSFER_SRC): WT_PCMENU_SHOT */
+static int g_sc_src;                                  /* [moonriver] the swapchain images can be read (TRANSFER_SRC): MR_PCMENU_SHOT */
 static int swapchain_create(void) {
     VkSurfaceCapabilitiesKHR caps;
     VkResult r = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(V.gpu, V.surface, &caps);
@@ -255,7 +255,7 @@ static int swapchain_create(void) {
     ci.imageFormat = sf.format; ci.imageColorSpace = sf.colorSpace;
     ci.imageExtent = ext;
     ci.imageArrayLayers = 1;
-    ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);      /* [witchtime] SRC: WT_PCMENU_SHOT reads the presented picture */
+    ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);      /* [moonriver] SRC: MR_PCMENU_SHOT reads the presented picture */
     g_sc_src = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
     ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ci.preTransform = caps.currentTransform;
@@ -273,7 +273,7 @@ static int swapchain_create(void) {
     return 1;
 }
 
-/* present mode from graphics.ini vsync (the environment switch wins); [witchtime] also when the PC menu changes vsync (pcmenu.c,
+/* present mode from graphics.ini vsync (the environment switch wins); [moonriver] also when the PC menu changes vsync (pcmenu.c,
  * the swapchain is made again after it) */
 static const char *const k_mode[4] = {"immediate", "mailbox", "fifo", "fifo_relaxed"};
 static void present_mode_pick(void) {
@@ -284,8 +284,8 @@ static void present_mode_pick(void) {
     VkResult r = vkGetPhysicalDeviceSurfacePresentModesKHR(V.gpu, V.surface, &nmode, modes);
     if (r != VK_SUCCESS && r != VK_INCOMPLETE) vk_fatal("vkGetPhysicalDeviceSurfacePresentModesKHR", r);
     for (uint32_t i = 0; i < nmode; i++) if (modes[i] >= 0 && modes[i] < 4) have[modes[i]] = 1;
-    if (getenv("WT_VK_NOMAILBOX") && atoi(getenv("WT_VK_NOMAILBOX"))) have[VK_PRESENT_MODE_MAILBOX_KHR] = 0;      /* TEST: as a GPU without mailbox (finding 121) */
-    const char *want = getenv("WT_VK_PRESENT");
+    if (getenv("MR_VK_NOMAILBOX") && atoi(getenv("MR_VK_NOMAILBOX"))) have[VK_PRESENT_MODE_MAILBOX_KHR] = 0;      /* TEST: as a GPU without mailbox (finding 121) */
+    const char *want = getenv("MR_VK_PRESENT");
     /* [Recomps#1] finding 121: without mailbox (AMD's Windows driver has none) FIFO, not immediate: display.c presents at
      * its tick, half a refresh after the vblank, and immediate put a tear through the middle of every frame there (a
      * player's RX 560 "texture flicker"). FIFO shows the frame at the next vblank, as mailbox does; every driver has it.
@@ -300,11 +300,11 @@ static void present_mode_pick(void) {
         int m = -1;
         for (int i = 0; i < 4; i++) if (!strcmp(want, k_mode[i])) m = i;
         if (m >= 0 && have[m]) V.mode = m;
-        else printf("nvn_vk: WT_VK_PRESENT=%s is %s: using %s\n", want, m < 0 ? "not a mode (immediate, mailbox, fifo, fifo_relaxed)" : "not offered by the surface", k_mode[V.mode]);
+        else printf("nvn_vk: MR_VK_PRESENT=%s is %s: using %s\n", want, m < 0 ? "not a mode (immediate, mailbox, fifo, fifo_relaxed)" : "not offered by the surface", k_mode[V.mode]);
     }
     if (V.mode == VK_PRESENT_MODE_FIFO_KHR && !want)
         printf("nvn_vk: the GPU offers no mailbox present mode%s: FIFO (a frame waits for the next vblank: no tearing) instead of immediate; vsync = off asks for immediate\n",
-               getenv("WT_VK_NOMAILBOX") && atoi(getenv("WT_VK_NOMAILBOX")) ? " (WT_VK_NOMAILBOX=1, a test)" : "");
+               getenv("MR_VK_NOMAILBOX") && atoi(getenv("MR_VK_NOMAILBOX")) ? " (MR_VK_NOMAILBOX=1, a test)" : "");
     else if (V.mode == VK_PRESENT_MODE_FIFO_KHR || V.mode == VK_PRESENT_MODE_FIFO_RELAXED_KHR)
         printf("nvn_vk: present mode %s: the display's own refresh now also holds the presents (a second clock next to display.c's)\n", k_mode[V.mode]);
 }
@@ -367,7 +367,7 @@ int nvn_vk_init(void *hwnd) {
     }
 #endif
     if (has_name(iext, niext, "VK_EXT_swapchain_colorspace")) exts[next++] = "VK_EXT_swapchain_colorspace";      /* [Recomps#1] finding 147: the HDR colour spaces */
-    { const char *e = getenv("WT_VK_VALIDATE"); V.validate = e && atoi(e) != 0; }
+    { const char *e = getenv("MR_VK_VALIDATE"); V.validate = e && atoi(e) != 0; }
     if (V.validate) {
         static VkLayerProperties lp[64];
         uint32_t nlp = 64;
@@ -375,11 +375,11 @@ int nvn_vk_init(void *hwnd) {
         r = vkEnumerateInstanceLayerProperties(&nlp, lp);
         for (uint32_t i = 0; (r == VK_SUCCESS || r == VK_INCOMPLETE) && i < nlp; i++) found |= !strcmp(lp[i].layerName, "VK_LAYER_KHRONOS_validation");
         if (found && has_name(iext, niext, "VK_EXT_debug_utils")) { layers[nlayers++] = "VK_LAYER_KHRONOS_validation"; exts[next++] = "VK_EXT_debug_utils"; }
-        else { V.validate = 0; printf("nvn_vk: WT_VK_VALIDATE=1 but VK_LAYER_KHRONOS_validation is not installed on this PC (%u layers known to the loader): running WITHOUT validation\n", (unsigned)nlp); }
+        else { V.validate = 0; printf("nvn_vk: MR_VK_VALIDATE=1 but VK_LAYER_KHRONOS_validation is not installed on this PC (%u layers known to the loader): running WITHOUT validation\n", (unsigned)nlp); }
     }
     VkApplicationInfo app;
     memset(&app, 0, sizeof app);
-    app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO; app.pApplicationName = "witch-time"; app.pEngineName = "nvn_vk"; app.apiVersion = VK_API_VERSION_1_3;
+    app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO; app.pApplicationName = "moon-river"; app.pEngineName = "nvn_vk"; app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo ici;
     memset(&ici, 0, sizeof ici);
     ici.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO; ici.pApplicationInfo = &app;
@@ -420,7 +420,7 @@ int nvn_vk_init(void *hwnd) {
     uint32_t ngpu = 16;
     r = vkEnumeratePhysicalDevices(V.instance, &ngpu, gpus);
     if ((r != VK_SUCCESS && r != VK_INCOMPLETE) || !ngpu) { printf("nvn_vk: no Vulkan device (%s, %u devices)\n", vk_result_name(r), (unsigned)ngpu); fflush(stdout); ExitProcess(5); }
-    int forced = getenv("WT_VK_DEVICE") ? atoi(getenv("WT_VK_DEVICE")) : -1, best = -1, best_score = -1;
+    int forced = getenv("MR_VK_DEVICE") ? atoi(getenv("MR_VK_DEVICE")) : -1, best = -1, best_score = -1;
     uint32_t best_family = 0;
     if (forced < 0 && gfx_options()->gpu[0]) {    /* track O: gpu = <number> | <part of the name> in graphics.ini (the environment switch wins) */
         const char *want = gfx_options()->gpu;
@@ -465,7 +465,7 @@ int nvn_vk_init(void *hwnd) {
                family < 0 ? " - cannot present to the window with a graphics + compute queue" : p.apiVersion < VK_API_VERSION_1_3 ? " - below Vulkan 1.3" : "");
         if (forced >= 0 ? (int)i == forced && usable : score > best_score) { best = (int)i; best_score = score; best_family = (uint32_t)family; }
     }
-    if (best < 0) { printf("nvn_vk: no usable Vulkan 1.3 device%s\n", forced >= 0 ? " (WT_VK_DEVICE names one that is not usable)" : ""); fflush(stdout); ExitProcess(5); }
+    if (best < 0) { printf("nvn_vk: no usable Vulkan 1.3 device%s\n", forced >= 0 ? " (MR_VK_DEVICE names one that is not usable)" : ""); fflush(stdout); ExitProcess(5); }
     V.gpu = gpus[best]; V.family = best_family;
     vkGetPhysicalDeviceProperties(V.gpu, &V.props);
 
@@ -493,7 +493,7 @@ int nvn_vk_init(void *hwnd) {
     vkGetDeviceQueue(V.device, V.family, 0, &V.queue);
 
     /* surface format: 8-bit BGRA / RGBA UNORM, sRGB colour space (the window texture's values are shown as they are, as the OpenGL blit does) */
-    VkSurfaceFormatKHR fmts[256];                         /* [witchtime] Mesa on Wayland lists 81 (9 formats in 9 colour spaces): 64 cut the HDR ones off */
+    VkSurfaceFormatKHR fmts[256];                         /* [moonriver] Mesa on Wayland lists 81 (9 formats in 9 colour spaces): 64 cut the HDR ones off */
     uint32_t nfmt = 256;
     r = vkGetPhysicalDeviceSurfaceFormatsKHR(V.gpu, V.surface, &nfmt, fmts);
     if ((r != VK_SUCCESS && r != VK_INCOMPLETE) || !nfmt) vk_fatal("vkGetPhysicalDeviceSurfaceFormatsKHR", r);
@@ -639,7 +639,7 @@ void nvn_vk_report(FILE *out) {
             (long long)g_vk_frames, (long long)g_vk_skipped, (long long)g_vk_recreated, (long long)g_vk_errors, (long long)g_vk_messages, V.validate ? "layer on" : "layer off", (long long)g_vk_missing_calls);
 }
 
-/* ---------------------------------------------------------------- M1 self-test (WT_VK_SELFTEST=<frames>)
+/* ---------------------------------------------------------------- M1 self-test (MR_VK_SELFTEST=<frames>)
  * Presents <frames> cleared frames exactly as the game presents: display_before_present, the present job on the render
  * thread, display_pace, then the wait the game does on the window texture's sync (display_wait_refresh). Prints the
  * number a 60 Hz clock must give: frames / seconds, and the frame intervals. */
@@ -651,7 +651,7 @@ static void job_selftest_frame(void *arg) {
 static void job_shutdown(void *arg) { (void)arg; nvn_vk_shutdown(); }
 static int cmp_double(const void *a, const void *b) { double x = *(const double *)a, y = *(const double *)b; return x < y ? -1 : x > y; }
 void nvn_vk_selftest_hook(void) {
-    const char *e = getenv("WT_VK_SELFTEST");
+    const char *e = getenv("MR_VK_SELFTEST");
     int n = e ? atoi(e) : 0;
     if (!V.alive || n <= 0) return;
     LARGE_INTEGER f, t0, prev, now;
@@ -677,7 +677,7 @@ void nvn_vk_selftest_hook(void) {
     ExitProcess(g_vk_errors || g_vk_skipped ? 1 : 0);
 }
 
-int nvn_vk_hdr_on(void) { return V.hdr != 0; }             /* [witchtime] pcmenu.c: the rows of HDR's brightness */
+int nvn_vk_hdr_on(void) { return V.hdr != 0; }             /* [moonriver] pcmenu.c: the rows of HDR's brightness */
 #include "nvn_vk_draw.c"                                   /* everything that draws (session 2): not a build unit of its own */
-#include "nvn_vk_pcmenu.c"                                 /* [witchtime] the PC settings menu on the screen */
-#include "nvn_vk_fsr.c"                                    /* [witchtime] issue 118: FSR 3.1 as anti-aliasing */
+#include "nvn_vk_pcmenu.c"                                 /* [moonriver] the PC settings menu on the screen */
+#include "nvn_vk_fsr.c"                                    /* [moonriver] issue 118: FSR 3.1 as anti-aliasing */

@@ -1,8 +1,8 @@
-/* [witchtime] #54: ASTC textures already turned into BC7 (`wtbuild textures`; bc7_textures in graphics.ini, on by default). A texture
+/* [moonriver] #54: ASTC textures already turned into BC7 (`mrbuild textures`; bc7_textures in graphics.ini, on by default). A texture
  * is found by a hash of its ASTC bytes, so nothing of the game's data changes, a mod's texture is simply not found, and
  * anything not found goes the way it always went (decoded here, BC3).
- *   <dir>/index.wtx   "WTXI", u32 version, u32 shards, u32 entries; shards x 32 bytes of file name; the entries, sorted by hash
- *   <dir>/<name>.wtx  LZ4 blocks one after the other (stored == raw: plain BC7); the shard's own entries and a footer follow,
+ *   <dir>/index.mrx   "MRXI", u32 version, u32 shards, u32 entries; shards x 32 bytes of file name; the entries, sorted by hash
+ *   <dir>/<name>.mrx  LZ4 blocks one after the other (stored == raw: plain BC7); the shard's own entries and a footer follow,
  *                     from which the build tool resumes and writes the index
  * A read opens the file: the workers of tex_prep read at the same time, and a read is rare next to what it saves. */
 #include <stdio.h>
@@ -31,10 +31,10 @@ int tex_pack_open(const char *dir) {
     char path[600];
     uint32_t head[4];
     snprintf(g_dir, sizeof g_dir, "%s", dir);
-    snprintf(path, sizeof path, "%s/index.wtx", dir);
+    snprintf(path, sizeof path, "%s/index.mrx", dir);
     FILE *f = fopen(path, "rb");
     if (!f) return 0;
-    if (fread(head, 4, 4, f) == 4 && !memcmp(head, "WTXI", 4) && head[1] == TEX_PACK_VERSION && head[2] <= 256 && head[3] <= 1u << 24) {
+    if (fread(head, 4, 4, f) == 4 && !memcmp(head, "MRXI", 4) && head[1] == TEX_PACK_VERSION && head[2] <= 256 && head[3] <= 1u << 24) {
         g_name = malloc((size_t)head[2] * 32 + 1); g_e = malloc((size_t)head[3] * sizeof *g_e + 1);
         if (g_name && g_e && fread(g_name, 32, head[2], f) == head[2] && fread(g_e, sizeof *g_e, head[3], f) == head[3]) { g_shards = head[2]; g_n = head[3]; }
     }

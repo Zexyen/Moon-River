@@ -1,7 +1,7 @@
-/* Shim of the game DLL generated WITH landing-pad resume entries (tools/wtbuild/src/lifter/eh.rs).
+/* Shim of the game DLL generated WITH landing-pad resume entries (tools/mrbuild/src/lifter/eh.rs).
  * Everything of game_shim.c, plus what the exception unwinder needs from main: the resume table, the host's
  * nro_catch_call for functions with a catch handler, and Bayonetta 2's game-specific patch helpers called from
- * the lifted code (games/bayonetta2/wtbuild/post_lift.rs):
+ * the lifted code (games/bayonetta2/mrbuild/post_lift.rs):
  *   - Findings 146 & 150: cutscenes release deleted characters and rebind safely when no package is unloading;
  *   - Finding 148: action prompt ring crescent rotates to match printed-letter button positions;
  *   - Findings 107, 113, 114, 129, 134, 136, 139, 144: >60 fps (up to 120 fps) clock, smart tick counters,

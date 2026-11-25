@@ -6,7 +6,7 @@
 #endif
 #include "plat.h"
 #include "posix/win32_absent.h"
-#include "plat_hash.h"                        /* [witchtime] SHA-1 / MD5 of our own: no libcrypto */
+#include "plat_hash.h"                        /* [moonriver] SHA-1 / MD5 of our own: no libcrypto */
 #include <dirent.h>
 #include <locale.h>
 #include <dlfcn.h>
@@ -14,7 +14,7 @@
 #include <fnmatch.h>
 #include <sys/stat.h>
 #ifdef __APPLE__
-/* [witchtime] macOS (Apple silicon). What differs from Linux, each at its place below: thread ids, timed waits (no
+/* [moonriver] macOS (Apple silicon). What differs from Linux, each at its place below: thread ids, timed waits (no
  * CLOCK_MONOTONIC condition variables), fibers (a context switch of our own: ucontext is deprecated there), 16 KB pages
  * (plat_mprotect), the guest's fixed addresses (plat_guest_space), the memory map (mach_vm_region for /proc/self/maps),
  * the write watch (write faults for userfaultfd), the libraries' names. */
@@ -36,7 +36,7 @@ static DWORD self_tid(void) { uint64_t id = 0; pthread_threadid_np(NULL, &id); r
 #include <sys/syscall.h>
 #include <ucontext.h>
 #endif
-#if !defined(__APPLE__) && !defined(PAGEMAP_SCAN)                          /* [witchtime] Linux 6.7's uapi, for older kernel headers (the release builds
+#if !defined(__APPLE__) && !defined(PAGEMAP_SCAN)                          /* [moonriver] Linux 6.7's uapi, for older kernel headers (the release builds
                                                  on Ubuntu 22.04); whether the kernel has it is asked at run time */
 #define PAGEMAP_SCAN _IOWR('f', 16, struct pm_scan_arg)
 #define PAGE_IS_WRITTEN (1 << 1)
@@ -54,7 +54,7 @@ struct pm_scan_arg { __u64 size, flags, start, end, walk_end, vec, vec_len, max_
 #endif
 
 #ifndef __APPLE__
-/* [witchtime] the start of this module: the program, or libwitchtime.so when the launcher runs the game in its process */
+/* [moonriver] the start of this module: the program, or libmoonriver.so when the launcher runs the game in its process */
 extern const char __ehdr_start __attribute__((visibility("hidden")));
 #define SELF_MODULE ((HMODULE)&__ehdr_start)
 static DWORD self_tid(void) { return (DWORD)syscall(SYS_gettid); }
@@ -320,13 +320,13 @@ BOOL InitOnceExecuteOnce(INIT_ONCE *once, BOOL (*fn)(INIT_ONCE *, PVOID, PVOID *
 /* ---------------------------------------------------------------- fibers */
 DWORD FlsAlloc(void (*dtor)(PVOID)) { pthread_key_t k; return pthread_key_create(&k, dtor) ? FLS_OUT_OF_INDEXES : (DWORD)k; }
 #ifdef __APPLE__
-/* [witchtime] macOS: ucontext is deprecated there, and swapcontext makes two system calls for the signal mask. A fiber's
+/* [moonriver] macOS: ucontext is deprecated there, and swapcontext makes two system calls for the signal mask. A fiber's
  * context is what AAPCS64 keeps across a call: x19..x28, the frame pointer, the return address, the stack pointer and
- * d8..d15. wt_fiber_swap saves it in `from` and continues `to`; a new fiber starts in wt_fiber_start with its Fiber in
+ * d8..d15. mr_fiber_swap saves it in `from` and continues `to`; a new fiber starts in mr_fiber_start with its Fiber in
  * x19. (x18 is the system's and never touched.) */
 typedef struct { uint64_t x[12], sp, d[8]; } FiberCtx;      /* x19..x28, x29, x30 */
-void wt_fiber_swap(FiberCtx *from, const FiberCtx *to);
-void wt_fiber_start(void);
+void mr_fiber_swap(FiberCtx *from, const FiberCtx *to);
+void mr_fiber_start(void);
 __asm__(".text\n.p2align 2\n.globl _wt_fiber_swap\n_wt_fiber_swap:\n"
         "  stp x19, x20, [x0, #0]\n  stp x21, x22, [x0, #16]\n  stp x23, x24, [x0, #32]\n  stp x25, x26, [x0, #48]\n"
         "  stp x27, x28, [x0, #64]\n  stp x29, x30, [x0, #80]\n  mov x9, sp\n  str x9, [x0, #96]\n"
@@ -338,7 +338,7 @@ __asm__(".text\n.p2align 2\n.globl _wt_fiber_swap\n_wt_fiber_swap:\n"
         ".globl _wt_fiber_start\n_wt_fiber_start:\n  mov x0, x19\n  bl _wt_fiber_run\n  brk #1\n");
 typedef struct Fiber { FiberCtx uc; LPFIBER_START_ROUTINE fn; void *arg, *stack; size_t stack_size; } Fiber;
 static __thread Fiber *t_fiber;
-void wt_fiber_run(Fiber *f) { f->fn(f->arg); _exit(70); }   /* a fiber function never returns (Windows ends the thread) */
+void mr_fiber_run(Fiber *f) { f->fn(f->arg); _exit(70); }   /* a fiber function never returns (Windows ends the thread) */
 #else
 typedef struct Fiber { ucontext_t uc; LPFIBER_START_ROUTINE fn; void *arg, *stack; size_t stack_size; } Fiber;
 static __thread Fiber *t_fiber;
@@ -359,7 +359,7 @@ LPVOID CreateFiberEx(SIZE_T commit, SIZE_T reserve, DWORD flags, LPFIBER_START_R
     f->fn = fn; f->arg = arg;
 #ifdef __APPLE__
     f->uc.x[0] = (uint64_t)(uintptr_t)f;                                             /* x19 */
-    f->uc.x[11] = (uint64_t)(uintptr_t)wt_fiber_start;                               /* x30 */
+    f->uc.x[11] = (uint64_t)(uintptr_t)mr_fiber_start;                               /* x30 */
     f->uc.sp = ((uint64_t)(uintptr_t)f->stack + f->stack_size) & ~(uint64_t)15;
 #else
     getcontext(&f->uc);
@@ -374,7 +374,7 @@ void SwitchToFiber(LPVOID fiber) {
     Fiber *from = t_fiber, *to = fiber;
     t_fiber = to;
 #ifdef __APPLE__
-    wt_fiber_swap(&from->uc, &to->uc);
+    mr_fiber_swap(&from->uc, &to->uc);
 #else
     swapcontext(&from->uc, &to->uc);
 #endif
@@ -392,7 +392,7 @@ static size_t g_nregions, g_cap;
 static pthread_mutex_t g_reg_lock = PTHREAD_MUTEX_INITIALIZER;
 static size_t page_up(size_t n) { return (n + 4095) & ~(size_t)4095; }
 #ifdef __APPLE__
-/* [witchtime] mprotect for 4 KB ranges on a host with larger pages (16 KB on Apple silicon; mprotect refuses an address
+/* [moonriver] mprotect for 4 KB ranges on a host with larger pages (16 KB on Apple silicon; mprotect refuses an address
  * inside one). Access is given to every host page the range touches and taken only from the ones it covers whole: what
  * the guest may reach it always can, and a protection that cannot be had exactly is the weaker one. */
 int plat_mprotect(void *p, size_t size, int prot) {
@@ -401,7 +401,7 @@ int plat_mprotect(void *p, size_t size, int prot) {
     else { a = (a + hp) & ~hp; e &= ~hp; }
     return e > a ? mprotect((void *)a, e - a, prot) : 0;
 }
-/* [witchtime] The guest's fixed addresses (the image at 0x7100000000, the import area, the sdk at 0x7500000000) lie where
+/* [moonriver] The guest's fixed addresses (the image at 0x7100000000, the import area, the sdk at 0x7500000000) lie where
  * macOS's own allocator reserves 12 GB at a place it picks anew for every process, between 0x7000000000 and 0x8000000000:
  * about every second start it is in the way. plat_guest_space, called first thing, reserves the whole range; when part
  * of it is taken it starts the program again (the same process, a new address space layout), a few milliseconds each
@@ -418,7 +418,7 @@ void plat_guest_space(char **argv) {
         g_guest_reserved = 1;
         return;
     }
-    const char *e = getenv("WT_GUEST_SPACE_TRY");
+    const char *e = getenv("MR_GUEST_SPACE_TRY");
     int n = e ? atoi(e) : 0;
     char num[16], self[4096];
     if (n >= 64 || !argv || !GetModuleFileNameA(NULL, self, sizeof self)) {
@@ -426,7 +426,7 @@ void plat_guest_space(char **argv) {
         exit(1);
     }
     snprintf(num, sizeof num, "%d", n + 1);
-    setenv("WT_GUEST_SPACE_TRY", num, 1);
+    setenv("MR_GUEST_SPACE_TRY", num, 1);
     fflush(NULL);
     execv(self, argv);
     perror("execv"); exit(1);
@@ -481,14 +481,14 @@ static int to_prot(DWORD p) {
  * (an older kernel, userfaultfd not allowed) a watched region answers "every page written": always correct, only slower. */
 static int g_uffd = -1, g_pagemap = -1, g_ww_state;   /* g_ww_state: 0 not tried, 1 on, 2 not available */
 #ifdef __APPLE__
-/* [witchtime] macOS has no userfaultfd and no way to ask which pages were written. A watched region is kept read-only
+/* [moonriver] macOS has no userfaultfd and no way to ask which pages were written. A watched region is kept read-only
  * instead: the first write to a page faults (SIGBUS), the handler notes the page as written and makes it writable, and the
  * write runs again. Asking with a reset makes the pages read-only again. A host page is 16 KB, four of the guest's: a fault
  * marks all four, a question clears only the ones it asked about but takes the write access of the whole host page, so
  * the next write to any of the four marks them all again (two textures can share a host page).
  * What the kernel itself writes into a watched page (a read() into it) would fail there instead of faulting: ww_touch
  * marks and opens the pages first (ReadFile below). shortcut: a protection the guest set inside a watched region is lost
- * at the first write there. WT_WW=0: not tracked, every watched page counts as written (the state before this). */
+ * at the first write there. MR_WW=0: not tracked, every watched page counts as written (the state before this). */
 #include <signal.h>
 typedef struct { uintptr_t base; size_t size; uint8_t *bits; volatile int lock; } WwRegion;      /* bits: one byte per host page, bit k = its guest page k written */
 static WwRegion g_ww[8];
@@ -531,7 +531,7 @@ static void ww_touch(uintptr_t a, size_t n) {
 }
 /* a new watched region [p, p+size): nothing written yet */
 static int ww_track(uintptr_t p, size_t size) {
-    const char *e = getenv("WT_WW");
+    const char *e = getenv("MR_WW");
     uintptr_t hs = (uintptr_t)getpagesize();
     pthread_mutex_lock(&g_reg_lock);
     int ok = !(e && !atoi(e)) && g_nww < 8 && !(p & (hs - 1));
@@ -549,7 +549,7 @@ static int ww_track(uintptr_t p, size_t size) {
         __atomic_store_n(&g_nww, g_nww + 1, __ATOMIC_RELEASE);
     } else ok = 0;
     if (!g_ww_state || (!ok && g_ww_state == 1)) printf(ok ? "plat: write watch tracked by write faults (macOS: watched pages are read-only until written)\n"
-                                                           : "plat: write watch NOT tracked (WT_WW=0, or no room): every watched page counts as written\n");
+                                                           : "plat: write watch NOT tracked (MR_WW=0, or no room): every watched page counts as written\n");
     g_ww_state = ok ? 1 : 2;
     pthread_mutex_unlock(&g_reg_lock);
     return ok;
@@ -805,9 +805,9 @@ void GetSystemInfo(SYSTEM_INFO *si) {
 HMODULE LoadLibraryA(LPCSTR name) {
     static const char *const map[][2] = {      /* the Windows DLLs the runtime opens by name, and their Linux libraries */
 #ifdef __APPLE__
-        {"vulkan-1.dll", "libvulkan.1.dylib"}, {"wt_glslang.dll", "libwt_glslang.dylib"}, {"SDL3.dll", "libSDL3.0.dylib"}, {"libopus-0.dll", "libopus.0.dylib"},
+        {"vulkan-1.dll", "libvulkan.1.dylib"}, {"mr_glslang.dll", "libmr_glslang.dylib"}, {"SDL3.dll", "libSDL3.0.dylib"}, {"libopus-0.dll", "libopus.0.dylib"},
 #else
-        {"vulkan-1.dll", "libvulkan.so.1"}, {"wt_glslang.dll", "libwt_glslang.so"}, {"SDL3.dll", "libSDL3.so.0"}, {"libopus-0.dll", "libopus.so.0"},
+        {"vulkan-1.dll", "libvulkan.so.1"}, {"mr_glslang.dll", "libmr_glslang.so"}, {"SDL3.dll", "libSDL3.so.0"}, {"libopus-0.dll", "libopus.so.0"},
 #endif
     };
     for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
@@ -853,7 +853,7 @@ DWORD GetModuleFileNameA(HMODULE m, LPSTR out, DWORD n) {
     return (DWORD)len;
 #endif
 }
-/* [witchtime] ExitProcess (plat.h). A host that runs the game in its own process (launcher/, through libwitchtime.so) sets
+/* [moonriver] ExitProcess (plat.h). A host that runs the game in its own process (launcher/, through libmoonriver.so) sets
  * the hook to see the exit first: it goes back to its own screens instead of ending with the game. */
 void (*plat_exit_hook)(int code);
 void plat_exit_process(int code) {

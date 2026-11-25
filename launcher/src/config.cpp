@@ -90,7 +90,7 @@ bool file_exists(const std::string& path)
 
 std::vector<std::string> build_command(const std::string& repo, const std::string& command)
 {
-	for (const std::string& exe : {repo + "/build/wtbuild" WT_EXE, repo + "/tools/wtbuild/target/release/wtbuild" WT_EXE})
+	for (const std::string& exe : {repo + "/build/mrbuild" MR_EXE, repo + "/tools/mrbuild/target/release/mrbuild" MR_EXE})
 		if (is_program(exe))
 			return {exe, command, "--repo", repo};
 	return {};
@@ -113,7 +113,7 @@ Paths Paths::find(const char* argv0)
 	ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
 	p.self = n > 0 ? std::string(buf, size_t(n)) : std::string(argv0);
 #endif
-	const char* env = std::getenv("LAUNCHER_REPO");
+	const char* env = std::getenv("MR_REPO");
 	std::string place = p.self;
 #ifdef __APPLE__
 	// in build/<name>.app/Contents/MacOS: the bundle stands where the program does

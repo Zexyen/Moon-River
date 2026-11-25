@@ -7,20 +7,21 @@
 #include "ui_render.h"
 #include <RmlUi/Core.h>
 #include <SDL3/SDL.h>
+#include <algorithm>
+#include <cstdlib>
+#include <ctime>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
-#include <algorithm>
-#include <cstdlib>
 
-/* test aid: LAUNCHER_SLOWMO=<n> slows every animation n times (RmlUi's clock), so frames of a 0.3 s motion can be grabbed */
+/* test aid: MR_SLOWMO=<n> slows every animation n times (RmlUi's clock), so frames of a 0.3 s motion can be grabbed */
 struct SlowSystem : SystemInterface_SDL
 {
 	double slow = 1;
-	explicit SlowSystem(SDL_Window* w) : SystemInterface_SDL(w) { if (const char* e = std::getenv("LAUNCHER_SLOWMO")) slow = std::max(1.0, std::atof(e)); }
+	explicit SlowSystem(SDL_Window* w) : SystemInterface_SDL(w) { if (const char* e = std::getenv("MR_SLOWMO")) slow = std::max(1.0, std::atof(e)); }
 	double GetElapsedTime() override { return SystemInterface_SDL::GetElapsedTime() / slow; }
-	// RmlUi's own drops a query (it rebuilds the path from the URL's parts); ui_render.cpp reads a picture's "?a=" alpha
+	// RmlUi's own drops a query (it rebuilds the path from the URL's parts); ui_render.cpp reads query parameters on gen: sources
 	void JoinPath(Rml::String& out, const Rml::String& document, const Rml::String& path) override
 	{
 		const size_t q = path.find('?');
@@ -33,8 +34,20 @@ struct SlowSystem : SystemInterface_SDL
 struct CheckRow { Rml::String text, right, state; };
 struct StepRow { Rml::String num, name, note, right, state; };
 struct ModRow { Rml::String name, note, kind; bool on = true; };
-struct SettingRow { Rml::String name, note, value; int index = 0; Rml::String bump = "none"; };   // index: the row in setting_defs(); bump: the value's nudge animation after a change
-struct MenuRow { Rml::String label, tag; std::string action; bool dim = false; };   // a bar of the title's staircase
+struct SettingRow {
+	Rml::String name, note, value;
+	int index = 0;
+	Rml::String bump = "none";   // the value's nudge animation after a change
+	bool changed = false;        // changed in this session (rendered in the warm accent)
+};
+struct MenuRow {
+	Rml::String label, desc, tag;
+	std::string action;
+	Rml::String transform;       // translateY + scale relative to the selected title menu item
+	float opacity = 1.f;
+	bool selected = false;
+	bool far = false;            // 3+ steps away: hidden and not clickable
+};
 
 class App {
 public:
@@ -53,24 +66,30 @@ private:
 	std::vector<SDL_Gamepad*> pads;
 	int prompts = 4;                // footer hints: 1 Switch, 2 PlayStation, 3 Xbox, 4 keyboard
 	bool prompts_fixed = false;     // [general] button_prompts names one; else they follow what was used last
+	int stick_x = 0, stick_y = 0;   // left-stick directional state for navigation
+	double stick_next = 0;
 	void prompts_read();
 	void prompts_use(int family);
 	void prompts_use(SDL_Gamepad* pad);
 	std::vector<std::vector<Rml::byte>> font_data;
 
-	// what the screens show (the data model "wt")
+	// what the screens show (the data model "mr")
 	Rml::String screen = "title";
 	bool built = false, status_bad = false;
-	float hour_deg = 0, minute_deg = 0;   // the title dial's hands, at this machine's local time
-	Rml::String status_title, status_line, footer_info, version;
+	Rml::String moon_src, shimmer_src, moon_phase_name;
+	std::time_t moon_checked_at = 0;
+	int moon_phase_q = -1;             // quantized phase (0..999)
+	bool moon_dim_last = false;
+	Rml::String status_title, status_line, menu_desc, footer_info, setup_footer, build_footer, version;
 	std::vector<MenuRow> menu;
+	int menu_sel = 0;
 	Rml::String update_tag;            // a newer release to install, or empty
 	bool stale = false;                // built by another release than this launcher
 	Rml::String dump;
 	bool checking = false, verified = false;
-	bool move_dump = false;   // setup moves the dump's game data into the build folder instead of copying it
-	bool dump_modified = false;    // the last check found files that differ from the supported version
-	bool accept_modified = false;  // setup runs with --accept-modified: such a dump is used anyway
+	bool move_dump = false;            // setup moves the dump's game data into the build folder instead of copying it
+	bool dump_modified = false;        // the last check found files that differ from the supported version
+	bool accept_modified = false;      // setup runs with --accept-modified: such a dump is used anyway
 	std::vector<CheckRow> checks;
 	bool building = false, converting = false;   // converting: the textures (building is true then too)
 	float progress = 0;
@@ -84,17 +103,16 @@ private:
 	Rml::String mods_summary, mods_error;
 	bool mods_rebuild = false;
 	std::vector<SettingRow> settings;  // the rows of the tab shown
-	int tab = 0;
-	float row_step = 26;              // dp each settings row steps right of the one above (refresh_settings)
-	int row_count = 0;                // rows of the tab shown (the rows under them come in after these)
-	float row_pitch = 56;             // dp from one settings row's top to the next one's
-	bool leaving = false;                  // a screen is on its way out (its leaving animations play); next_screen then opens
-	Rml::String next_screen; double leave_at = 0;
-	int bump_count[64] = {};               // per setting row: how many changes, signed by the last one                       // settings: 0 Display, 1 Graphics, 2 Controls
+	int tab = 0;                       // settings: 0 Display, 1 Graphics, 2 Controls
+	bool leaving = false;              // a screen is on its way out (its leaving animations play); next_screen then opens
+	Rml::String next_screen;
+	double leave_at = 0;
+	int bump_count[64] = {};           // per setting row: how many changes, signed by the last one
+	bool session_changed[64] = {};     // per setting row: changed in this session (warm accent)
 	Rml::String app_name = APP_NAME;
 	Rml::String tex_note, tex_action, tex_switch;  // settings: the converted textures (#54); tex_switch: "Turn off"/"Turn on" (#136)
 	bool tex_remove = false;
-	Rml::String shortcut_note = "Starts the game without the launcher";   // settings: the desktop shortcut (#143), then where it is
+	Rml::String shortcut_note = "Starts the game straight away.";   // settings: the desktop shortcut (#143), then where it is
 
 	// work for the main loop
 	BuildRunner runner;
@@ -125,13 +143,18 @@ private:
 	bool hint_click(float x);
 	void back();
 	void tick();
-	void tick_clock();
+	void tick_moon(bool force = false);
+	void tick_stick();
 	void draw();
+	void save_shot(const char* path);
 	void rescale();
 	void focus_first();
 
 	void go(const Rml::String& to);
 	void go_now(const Rml::String& to);
+	void select_menu(int index, bool play_sound = false);
+	void activate_menu(int index);
+	void refresh_menu_layout();
 	void refresh_title();
 	void refresh_build();
 	void refresh_mods();

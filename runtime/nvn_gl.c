@@ -19,15 +19,15 @@
  *   - Window origin is upper-left and depth is 0..1 (glClipControl), so row 0 of every GL texture is the
  *     top row, as in NVN; only the final blit to the window is flipped.
  *
- * Debug aids (environment): WT_SHOT=<n> / WT_SHOT_EVERY=<k> save presented frames as frame_<n>.bmp (in WT_SHOT_DIR if set, from frame WT_SHOT_FROM on);
- * WT_RTDUMP=<n> saves every colour target at frame n; WT_DRAWSHOT=<n> the target after each draw
- * (with WT_DRAWSHOT_CLEAR, cleared before each); WT_DRAWLOG=<n> prints state, uniforms and textures of
- * every draw of frame n and writes the textures as tex_*.rgba; WT_SHADERDUMP=<dir> writes shader text,
- * machine code and generated GLSL; WT_NOSCISSOR, WT_SKIPDRAW=<i>, WT_FRAGDEBUG (magenta fragments),
- * WT_GLDEBUG (driver messages, error check after every command); WT_NOCOMPUTE skips every compute dispatch (fighters then
- * stay in their bind pose); WT_DRAWLOG_MINDISP=<n> makes WT_DRAWLOG count frames with at least n dispatches (the draw log
+ * Debug aids (environment): MR_SHOT=<n> / MR_SHOT_EVERY=<k> save presented frames as frame_<n>.bmp (in MR_SHOT_DIR if set, from frame MR_SHOT_FROM on);
+ * MR_RTDUMP=<n> saves every colour target at frame n; MR_DRAWSHOT=<n> the target after each draw
+ * (with MR_DRAWSHOT_CLEAR, cleared before each); MR_DRAWLOG=<n> prints state, uniforms and textures of
+ * every draw of frame n and writes the textures as tex_*.rgba; MR_SHADERDUMP=<dir> writes shader text,
+ * machine code and generated GLSL; MR_NOSCISSOR, MR_SKIPDRAW=<i>, MR_FRAGDEBUG (magenta fragments),
+ * MR_GLDEBUG (driver messages, error check after every command); MR_NOCOMPUTE skips every compute dispatch (fighters then
+ * stay in their bind pose); MR_DRAWLOG_MINDISP=<n> makes MR_DRAWLOG count frames with at least n dispatches (the draw log
  * lists each dispatch with its buffers and marks vertex buffers written by compute); every 300 frames a line with the frame
- * rate. WT_NVN_MISSING=warn (nvn_stub.c): a call of an NVN function without an implementation does not stop the game.
+ * rate. MR_NVN_MISSING=warn (nvn_stub.c): a call of an NVN function without an implementation does not stop the game.
  *
  * Compute (nvnCommandBufferDispatchCompute): see the block above compute_dispatch. The five compute programs built into the
  * executable carry NV assembly text and run through GL_NV_compute_program5; the others are Maxwell machine code without a
@@ -78,10 +78,10 @@ void input_frame_draws(int draws);                                    /* nnhid.c
 void display_pace(void);                                              /* display.c */
 int display_wait_refresh(void);                                       /* display.c, P3 round 3: one refresh clock */
 void display_before_present(void);
-void display_clock_sample(uint64_t index_ptr);                        /* WT_CLOCKSTAT */
+void display_clock_sample(uint64_t index_ptr);                        /* MR_CLOCKSTAT */
 static void *volatile g_window_sync;                                  /* the sync object of the last nvnWindowAcquireTexture */
 void display_set_interval(int n);
-/* V1 (plan\phases\V1_vulkan.md, seam step S0): WT_RENDERER=vk. The render thread then starts nvn_vk.c instead of an
+/* V1 (plan\phases\V1_vulkan.md, seam step S0): MR_RENDERER=vk. The render thread then starts nvn_vk.c instead of an
  * OpenGL context and its jobs go through vk_route (end of this file); nothing else in this file changes behaviour. */
 int nvn_vk_init(void *hwnd);
 void nvn_vk_present_black(void);
@@ -90,7 +90,7 @@ void nvn_vk_shutdown(void);
 void nvn_vk_missing(const char *what);
 void nvn_vk_report(FILE *out);
 static int g_vk;
-const RBackend *g_rb = &rb_gl;                 /* seam step S2: chosen once in nvn_gl_start (WT_RENDERER) */
+const RBackend *g_rb = &rb_gl;                 /* seam step S2: chosen once in nvn_gl_start (MR_RENDERER) */
 static void vk_shutdown_at_exit(void);
 
 /* ---------------------------------------------------------------- OpenGL beyond 1.1 */
@@ -265,7 +265,7 @@ static LONG64 g_jl_slow_from;
 static inline LONG64 pf_now(void);
 static inline void pf_add(int k, LONG64 t0);
 enum { PF_WAIT_SUBMIT_ = 13, PF_WAIT_PRESENT_ = 14, PF_WAIT_OTHER_ = 15 };
-/* Hitch log (hitch.c, WT_HITCH=<ms>): what the render thread is doing right now, for the watchdog. Two stores per scope. */
+/* Hitch log (hitch.c, MR_HITCH=<ms>): what the render thread is doing right now, for the watchdog. Two stores per scope. */
 extern int g_hitch_ms;
 extern volatile const char *g_hitch_rt;
 extern volatile uint64_t g_hitch_rt_arg;
@@ -284,7 +284,7 @@ static void (*volatile g_jw_fn[JW_N])(void *);
 static volatile LONG64 g_jw[JW_N][7];
 static void (*volatile g_rt_cur)(void *);              /* the job the render thread runs now (NULL: idle) */
 static _Thread_local LONG64 t_jw[7];                    /* the last gl_run of this thread, as one row of g_jw */
-static int g_fastsync;                                  /* WT_FASTSYNC and its counters (at sync_wait) */
+static int g_fastsync;                                  /* MR_FASTSYNC and its counters (at sync_wait) */
 static volatile LONG64 g_fs[12];
 static void jw_add(int k, const LONG64 *v) { for (int i = 0; i < 7; i++) InterlockedExchangeAdd64(&g_jw[k][i], v[i]); }
 static int jw_kind(void (*fn)(void *)) {
@@ -322,7 +322,7 @@ static void gl_run(void (*fn)(void *), void *arg) {
     if (fn != g_rb->sync_wait) jw_add(jw_kind(fn), t_jw);
 }
 
-/* P3: nvnQueueSubmitCommands / FenceSync / Flush do not wait for the render thread (WT_SYNC_SUBMIT=1: they wait, as before).
+/* P3: nvnQueueSubmitCommands / FenceSync / Flush do not wait for the render thread (MR_SYNC_SUBMIT=1: they wait, as before).
  * Measured in a battle: the game's main thread calls, per frame, SyncWait x2, SubmitCommands, FenceSync, Flush, then works
  * for about 8 ms and calls PresentTexture; the replay of the submitted commands takes 6-9 ms, during which the main
  * thread used to stand still. NVN itself executes submitted commands later, on the GPU, and the game waits for its
@@ -339,7 +339,7 @@ static volatile LONG g_async_pending;
 static int g_sync_submit = -1;
 static void job_nop(void *arg) { (void)arg; }
 static int gl_async_on(void) {
-    if (g_sync_submit < 0) g_sync_submit = getenv("WT_SYNC_SUBMIT") != NULL;
+    if (g_sync_submit < 0) g_sync_submit = getenv("MR_SYNC_SUBMIT") != NULL;
     return !g_sync_submit;
 }
 static void gl_post(void (*fn)(void *), const void *arg, size_t size) {       /* run fn(copy of arg) on the render thread, in order, without waiting */
@@ -380,7 +380,7 @@ static const char *const k_pf_name[PF_N] = {"submit", "prep", "drawcall", "arena
                                             "otherjob", "wait-submit", "wait-present", "wait-other", "pace", "shader-translate", "shader-compile"};
 static volatile LONG64 g_pf[PF_N], g_pfn[PF_N];
 static LONG64 g_pf_arena_bytes, g_pf_cflush_bytes, g_pf_hash_bytes;
-/* WT_GLSTATS=1: one more line every 300 frames with per-frame counts (render-thread waits of guest threads, compute
+/* MR_GLSTATS=1: one more line every 300 frames with per-frame counts (render-thread waits of guest threads, compute
  * read-backs, objects created, shader work, and how many per-draw GL settings repeat the value of the previous draw). */
 static LONG64 g_gs_draws, g_gs_prog_same, g_gs_attr_set, g_gs_attr_same, g_gs_vbuf_bind, g_gs_buf_bind;
 static GLuint g_gs_last_prog[2];
@@ -399,7 +399,7 @@ static void logf_limited(int *counter, int limit, const char *fmt, ...) {
     fflush(stdout);
 }
 
-/* P3 round 4, WT_FDLOG=1 (diagnostics): every message of the driver is kept with its time (ring of 64) and counted
+/* P3 round 4, MR_FDLOG=1 (diagnostics): every message of the driver is kept with its time (ring of 64) and counted
  * per id; hitch_draw prints the ones that arrived during a slow draw call, nvn_gl_report the table. */
 static int g_fdlog;
 static unsigned g_fd_prim, g_fd_poly, g_fd_dclamp, g_fd_rdisc, g_fd_count;
@@ -422,7 +422,7 @@ static void APIENTRY debug_cb(GLenum source, GLenum type, GLuint id, GLenum seve
     (void)source; (void)length; (void)user;
     if (g_fdlog) fd_note(type, id, severity, message);
     if (severity == 0x826B) return;                       /* notifications */
-    if (type != 0x824C && !g_debug) return;               /* errors always; the rest only with WT_GLDEBUG */
+    if (type != 0x824C && !g_debug) return;               /* errors always; the rest only with MR_GLDEBUG */
     logf_limited(&n, g_debug ? 3000 : 60, "GL debug (type %x id %u) during %s / %s: %s\n", type, id, g_cur_op, (const char *)g_hitch_rt, message);
 }
 
@@ -675,12 +675,12 @@ static uint64_t mem_hash(const uint8_t *p, size_t n, int full) {
  * Asking resets the answer for those pages, and two textures can share a page (small textures) or the whole range (two
  * NVN textures on the same storage), so every written page gets a stamp in a table and a texture compares the newest stamp
  * of its pages with the stamp it saw last. Memory that is not write-watched (the image's own data, host heap) is hashed
- * as before. WT_NO_WRITEWATCH=1 restores the old behaviour everywhere. Render thread only. */
+ * as before. MR_NO_WRITEWATCH=1 restores the old behaviour everywhere. Render thread only. */
 #define WW_SLOTS (1u << 20)
 static struct { uint64_t page; uint64_t stamp; } *g_ww_tab;
 static uint64_t g_ww_stamp, g_ww_used, g_ww_floor;       /* g_ww_floor: stamp given to every page when the table had to be emptied */
 static int g_ww_off = -1;
-static LONG64 g_ww_clean, g_ww_dirty, g_ww_unwatched, g_ww_tm[10];     /* [4..8]: ww_tex_newest's counts (WT_VK_PREPTIME) */
+static LONG64 g_ww_clean, g_ww_dirty, g_ww_unwatched, g_ww_tm[10];     /* [4..8]: ww_tex_newest's counts (MR_VK_PREPTIME) */
 static uint64_t *ww_slot(uint64_t page, int insert) {
     for (unsigned h = (unsigned)((page * 0x9E3779B97F4A7C15ULL) >> 44);; h = (h + 1) & (WW_SLOTS - 1)) {
         if (g_ww_tab[h].page == page) return &g_ww_tab[h].stamp;
@@ -698,8 +698,8 @@ static uint64_t *ww_slot(uint64_t page, int insert) {
 static int g_ww_tmon = -1;
 static ULONG_PTR g_ww_found;                       /* the pages the last question found written */
 static void ww_init(void) {
-    if (g_ww_off < 0) { g_ww_off = getenv("WT_NO_WRITEWATCH") != NULL; g_ww_tab = calloc(WW_SLOTS, sizeof *g_ww_tab); g_ww_stamp = 1; }
-    if (g_ww_tmon < 0) g_ww_tmon = getenv("WT_VK_PREPTIME") && atoi(getenv("WT_VK_PREPTIME"));
+    if (g_ww_off < 0) { g_ww_off = getenv("MR_NO_WRITEWATCH") != NULL; g_ww_tab = calloc(WW_SLOTS, sizeof *g_ww_tab); g_ww_stamp = 1; }
+    if (g_ww_tmon < 0) g_ww_tmon = getenv("MR_VK_PREPTIME") && atoi(getenv("MR_VK_PREPTIME"));
 }
 /* Asks Windows which pages of [p, p+n) were written since the last question; they (and their blocks and regions) get a new
  * stamp. 0 = the memory is not write-watched. */
@@ -754,11 +754,11 @@ static uint64_t ww_newest(const uint8_t *p, size_t n) {
     if (g_ww_tmon) g_ww_tm[1] += pf_now() - t0;
     return newest;
 }
-/* WT_VK_PREPTIME: ticks in GetWriteWatch, ticks in the stamp table, questions, pages asked about; [4..8] (finding 145,
+/* MR_VK_PREPTIME: ticks in GetWriteWatch, ticks in the stamp table, questions, pages asked about; [4..8] (finding 145,
  * ww_tex_newest below): cluster questions, texture checks answered by their blocks' stamps, by their pages', textures that
  * asked for themselves, written pages the cluster questions found */
 const LONG64 *nvn_front_ww_times(void) { return g_ww_tm; }
-/* Round 16 (nvn_vk_draw.c, WT_VK_CBKEEP): the same question for any guest range: has the CPU written a page of it since
+/* Round 16 (nvn_vk_draw.c, MR_VK_CBKEEP): the same question for any guest range: has the CPU written a page of it since
  * the stamp the caller remembers? 0 = the memory is not write-watched. Render thread only. */
 uint64_t nvn_front_mem_newest(const void *p, size_t n) { return ww_newest(p, n); }
 /* [Recomps#1] finding 140 (nvn_vk_draw.c, the vertex buffers kept on the GPU): nvn_front_mem_region asks about a whole range
@@ -778,7 +778,7 @@ uint64_t nvn_front_mem_stamp(const void *p, size_t n) {
 uint64_t nvn_front_mem_now(void) { ww_init(); return g_ww_stamp; }
 /* [Recomps#1] finding 145 (cut C of finding 142): the textures a batch draws with were asked about one by one: ~340 questions a
  * fight frame at 120 fps (one batch a frame), each a GetWriteWatch of ~0.6 us + ~5 ns a page, then a walk over the texture's
- * pages in the stamp table, 0.4-0.5 ms of the render thread a frame. Two changes; WT_VK_TEXCLUSTER=0: both off.
+ * pages in the stamp table, 0.4-0.5 ms of the render thread a frame. Two changes; MR_VK_TEXCLUSTER=0: both off.
  * 1. Clusters: the ranges the previous batch checked (98.6 % of a frame's textures were checked the frame before), sorted and
  *    joined where less than 256 KB apart (~50 clusters for ~340 textures), are asked about whole, once per batch and again
  *    after each of our own writes into guest memory (gen = nvn_vk_draw.c's R.gen): one question for every texture inside
@@ -795,13 +795,13 @@ uint64_t nvn_front_mem_now(void) { ww_init(); return g_ww_stamp; }
 /* Issue 257: the clusters are made of the ranges checked in this frame and the one before, not by the last batch alone: a
  * frame of B3 is two or three batches that draw with different textures, so a batch found almost none of its textures in
  * the clusters of the batch before and each asked for itself (a ride: 480 questions a frame, 0.5 ms of the render thread,
- * against 7 cluster questions). WT_VK_TEXCLUSTER=2: the last batch alone, as before. */
+ * against 7 cluster questions). MR_VK_TEXCLUSTER=2: the last batch alone, as before. */
 static struct { uint64_t lo, hi; uint32_t frame, serial; } g_tcl_seen[TCL_N];      /* the ranges checked lately, one entry per check until the next batch sorts them */
 static struct { uint64_t lo, hi; } g_tcl[TCL_N];                        /* their clusters */
 static struct { uint32_t serial, gen; int bad; } g_tcl_q[TCL_N];        /* a cluster's last question; bad: Windows refused it */
 static int g_tcl_nseen, g_tcl_sorted, g_tcl_n, g_tcl_on = -1;
 static uint32_t g_tcl_serial;
-int nvn_vk_cutc_live(void);                        /* nvn_vk_draw.c: TEST ONLY WT_VK_CUTC_ALT */
+int nvn_vk_cutc_live(void);                        /* nvn_vk_draw.c: TEST ONLY MR_VK_CUTC_ALT */
 static int tcl_cmp(const void *a, const void *b) { uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b; return x < y ? -1 : x > y; }
 static void tcl_build(void) {                      /* a new batch: the clusters of the ranges checked in this frame and the last */
     uint32_t now = (uint32_t)g_st.frames;
@@ -837,7 +837,7 @@ int nvn_front_tex_cluster_hit(uint64_t addr, uint64_t size) {   /* 1 if [addr, a
 }
 static uint64_t ww_tex_newest(const uint8_t *p, size_t n, uint64_t seen, uint64_t *at, uint32_t gen) {
     ww_init();
-    if (g_tcl_on < 0) g_tcl_on = getenv("WT_VK_TEXCLUSTER") ? atoi(getenv("WT_VK_TEXCLUSTER")) : 1;
+    if (g_tcl_on < 0) g_tcl_on = getenv("MR_VK_TEXCLUSTER") ? atoi(getenv("MR_VK_TEXCLUSTER")) : 1;
     if (!g_tcl_on || !nvn_vk_cutc_live()) { *at = 0; return ww_newest(p, n); }
     if (g_ww_off || !n) return 0;
     uint64_t lo = (uint64_t)(uintptr_t)p, hi = lo + n;
@@ -867,12 +867,12 @@ static uint64_t ww_tex_newest(const uint8_t *p, size_t n, uint64_t seen, uint64_
     return newest;
 }
 
-/* [witchtime] A texture level decoded on the CPU (ASTC: the GPU here has none) is split into bands of block rows that a few
+/* [moonriver] A texture level decoded on the CPU (ASTC: the GPU here has none) is split into bands of block rows that a few
  * worker threads decode with this one: a 1024x1024 ASTC 10x10 level took 15-20 ms on the render thread, and a new area or
  * effect brings several at once (frames of 60-170 ms in Tokyo). A band of block rows is itself an image tex_decode_rgba8
  * decodes. The caller waits until every woken worker has left the job, so no worker reads the next job half written.
- * WT_TEXDEC_THREADS=<n> workers (default 6, 0 = all on the calling thread); single-threaded while WT_ASTC_DUMP /
- * WT_ASTC_LOG are set (their per-image output). The decoder's counters (tex_astc_bad_blocks ...) may then lose an
+ * MR_TEXDEC_THREADS=<n> workers (default 6, 0 = all on the calling thread); single-threaded while MR_ASTC_DUMP /
+ * MR_ASTC_LOG are set (their per-image output). The decoder's counters (tex_astc_bad_blocks ...) may then lose an
  * increment: informational. */
 #define DEC_MAX 16
 static struct { int nf, w, h, bh, rows, nbands; size_t srow, drow; const uint8_t *src; uint8_t *dst, *bc; volatile LONG next, left; } g_dj;      /* bc: also BC3 (issue 22) */
@@ -898,10 +898,10 @@ static DWORD WINAPI dec_worker(LPVOID a) {
 static void decode_par(int nf, const void *src, int w, int h, uint8_t *dst, uint8_t *bc) {      /* bc: also encoded to BC3 there, when not NULL */
     const TexFormat *tf = tex_format(nf);
     if (g_dec_n < 0) {
-        const char *e = getenv("WT_TEXDEC_THREADS");
+        const char *e = getenv("MR_TEXDEC_THREADS");
         g_dec_n = e ? atoi(e) : 6;
         if (g_dec_n > DEC_MAX) g_dec_n = DEC_MAX;
-        if (getenv("WT_ASTC_DUMP") || getenv("WT_ASTC_LOG") || g_dec_n < 0) g_dec_n = 0;
+        if (getenv("MR_ASTC_DUMP") || getenv("MR_ASTC_LOG") || g_dec_n < 0) g_dec_n = 0;
         if (g_dec_n) g_dec_fin = CreateEventA(NULL, FALSE, FALSE, NULL);
         for (int k = 0; k < g_dec_n; k++) { g_dec_go[k] = CreateEventA(NULL, FALSE, FALSE, NULL); CloseHandle(CreateThread(NULL, 0, dec_worker, (LPVOID)(intptr_t)k, 0, NULL)); }
     }
@@ -919,9 +919,9 @@ static void decode_par(int nf, const void *src, int w, int h, uint8_t *dst, uint
     dec_bands();
     WaitForSingleObject(g_dec_fin, INFINITE);
     InterlockedExchange(&busy, 0);
-    {   /* TEST ONLY: WT_TEXDEC_CHECK=1: each job decoded once more on this thread and compared */
+    {   /* TEST ONLY: MR_TEXDEC_CHECK=1: each job decoded once more on this thread and compared */
         static int chk = -1; static long jobs, bad;
-        if (chk < 0) chk = getenv("WT_TEXDEC_CHECK") != NULL;
+        if (chk < 0) chk = getenv("MR_TEXDEC_CHECK") != NULL;
         if (chk) {
             uint8_t *ref = malloc((size_t)w * h * 4);
             tex_decode_rgba8(nf, src, w, h, ref);
@@ -1308,7 +1308,7 @@ static void prog_add_stage(Prog *p, const char *text, int len, int serial) {
     }
     free(st->text);
     st->text = out; st->len = o; st->state = 1;
-    const char *dir = getenv("WT_SHADERDUMP");
+    const char *dir = getenv("MR_SHADERDUMP");
     if (dir) {
         char path[260];
         snprintf(path, sizeof path, "%s/p%05d_%s.txt", dir, serial, k_stage_name[s]);
@@ -1348,7 +1348,7 @@ static int stage_ready(Prog *p, int s) {
 
 /* A shader that came without assembly text: Maxwell machine code (program header + 64-bit instruction words). */
 static void dump_binary(Prog *p, int s) {
-    const char *dir = getenv("WT_SHADERDUMP");
+    const char *dir = getenv("MR_SHADERDUMP");
     char path[260];
     if (!dir) return;
     snprintf(path, sizeof path, "%s/b%05d_%s.bin", dir, p->serial, k_stage_name[s]);
@@ -1359,7 +1359,7 @@ static GLuint g_pipeline;
 /* The GLSL program for a stage given as machine code; 0 when it cannot be translated or the driver refuses it. */
 /* key: integer vertex inputs (all, signed) and integer textures (all, signed) as seen at this draw; a stage is translated
  * again when the bits it depends on change. */
-/* P3: translated vertex / fragment stages are shared and kept (WT_NO_SHADERCACHE=1 turns this off).
+/* P3: translated vertex / fragment stages are shared and kept (MR_NO_SHADERCACHE=1 turns this off).
  *   level 1: (stage, machine code, constants, the four key words) -> the translation's result and its GL program:
  *            a program object the game creates again from the same shader binary, or a stage that alternates between two
  *            keys, costs a table look-up instead of a translation and a driver compile;
@@ -1391,7 +1391,7 @@ static uint64_t sh_hash(uint64_t h, const void *data, size_t n) {
  *   The key is the generated TEXT, so a change of the translator can never pick up an old binary; another driver or GPU
  *   gets other file names, and a binary the driver refuses (glProgramBinary leaves the program unlinked) is compiled again
  *   and rewritten. Files are written under a temporary name and renamed, so several running copies can share the folder.
- *   WT_SHADER_CACHE=<dir> chooses the folder (default: ..\\cache\\shaders, i.e. Documents\\SSBU\\cache\\shaders), WT_SHADER_CACHE=0
+ *   MR_SHADER_CACHE=<dir> chooses the folder (default: ..\\cache\\shaders, i.e. Documents\\SSBU\\cache\\shaders), MR_SHADER_CACHE=0
  *   turns it off (every stage is then compiled with glCreateShaderProgramv, as before). */
 static LONG64 g_shd_loaded, g_shd_saved, g_shd_refused;
 static volatile LONG64 g_shw_queued, g_shw_done, g_shw_compiled, g_shw_present, g_shw_failed;
@@ -1402,7 +1402,7 @@ static void shd_workers_start(void);
 static void prec_load(void);
 /* Render thread, once, after the context exists. */
 static void shd_init(void) {
-    const char *e = getenv("WT_SHADER_CACHE");
+    const char *e = getenv("MR_SHADER_CACHE");
     g_shd_mode = !(e && !strcmp(e, "0")) && glCreateShader && glShaderSource && glCompileShader && glGetShaderiv && glAttachShader && glDetachShader && glDeleteShader &&
                  glCreateProgram && glLinkProgram && glProgramParameteri && glGetProgramBinary && glProgramBinary;
     if (!g_shd_mode) return;
@@ -1412,7 +1412,7 @@ static void shd_init(void) {
     CreateDirectoryA(g_shd_dir, NULL);
     g_shd_drv = 0x243F6A8885A308D3ULL;
     for (int i = 0; i < 3; i++) if (v[i]) g_shd_drv = sh_hash(g_shd_drv, v[i], strlen(v[i]));
-    printf("nvn_gl: shader binaries are kept in %s (WT_SHADER_CACHE=0 turns this off)%c", g_shd_dir, 10);
+    printf("nvn_gl: shader binaries are kept in %s (MR_SHADER_CACHE=0 turns this off)%c", g_shd_dir, 10);
     shd_workers_start();
     prec_load();
 }
@@ -1504,7 +1504,7 @@ static GLuint shader_build(GLenum type, const char *src, size_t len, uint64_t h,
  * the first draw comes, the render thread finds the binary there. Nothing is drawn differently: a stage whose binary is
  * not ready is compiled by the render thread exactly as before. The workers assume the common case for what a stage's
  * text can depend on (no integer vertex inputs or textures); a draw with another combination compiles its own text.
- * WT_SHADER_WORKERS=<n> (default 3, 0 = none). */
+ * MR_SHADER_WORKERS=<n> (default 3, 0 = none). */
 typedef struct ShJob { struct ShJob *next; int stage, code_len; uint32_t cdata_size; uint32_t key[4]; uint8_t data[1]; } ShJob;
 /* P3 round 2: which text variants of a stage were needed. A stage's GLSL depends on which vertex inputs and textures hold
  * integers at the draw (the four key words); the workers used to compile the variant with none only, so a stage first
@@ -1566,7 +1566,7 @@ static int g_shw_n;
  * own program objects of the same binaries, the driver finds the pair in its memory cache (1 ms instead of 65).
  * Which pairs: (1) every pair a draw used in an earlier run (<cache>/pairs.txt), queued at start; (2) the vertex and
  * fragment stage of a program the game hands over (nvnProgramSetShaders) after start-up, or always with
- * WT_PAIR_WARM=2; the caller is held until its program is ready, as the stage compile already did.
+ * MR_PAIR_WARM=2; the caller is held until its program is ready, as the stage compile already did.
  * When: the driver's lock means this work cannot hide behind the game (a 65 ms stall per cold pair on the render
  * thread), so while COLD work is pending (a warm draw or a compile took more than 8 ms) the render thread holds the
  * next present until the workers are done: the cost is paid as loading time, before the frames that need it.
@@ -1577,7 +1577,7 @@ static uint64_t g_pw_qseen[16384];
 static CRITICAL_SECTION g_pw_stripe[64];
 static volatile LONG g_pw_cold, g_shw_ctx_failed;
 static volatile LONG64 g_pw_named, g_pw_progs, g_pw_warmed, g_pw_cold_n, g_pw_ticks, g_pw_missing, g_pw_dup, g_pw_gate_ticks, g_pw_gates, g_pw_compiled;
-static int pw_mode(void) { static int m = -1; if (m < 0) { const char *e = getenv("WT_PAIR_WARM"); m = e ? atoi(e) : 1; } return m; }
+static int pw_mode(void) { static int m = -1; if (m < 0) { const char *e = getenv("MR_PAIR_WARM"); m = e ? atoi(e) : 1; } return m; }
 static int pw_seen(uint64_t vh, uint32_t vl, uint64_t fh, uint32_t fl, uint32_t mask) {
     unsigned k = (unsigned)((vh ^ fh * 0x9E3779B97F4A7C15ULL) >> 20) & 4095;
     int found = 0;
@@ -1634,7 +1634,7 @@ static char *pw_translate(int stage, const uint8_t *code, int code_len, const ui
     in.stage = stage; in.code = code; in.code_len = code_len;
     if (cdata_size) { in.cdata = cdata; in.cdata_size = cdata_size; }
     in.binding_base = (unsigned)stage * 20; in.ssbo_base = 40 + (unsigned)stage * 16;
-    in.fragdebug = getenv("WT_FRAGDEBUG") != NULL;
+    in.fragdebug = getenv("MR_FRAGDEBUG") != NULL;
     if (!mx_translate(&in, &out)) return NULL;
     if (in_attr) *in_attr = out.in_attr;
     return out.glsl;
@@ -1644,7 +1644,7 @@ static char *pw_translate(int stage, const uint8_t *code, int code_len, const ui
 static void pw_prog_known(const ShJob *j) {
     char path[260];
     uint64_t h;
-    if (j->stage != 3 || getenv("WT_NO_PAIR_LIST")) return;
+    if (j->stage != 3 || getenv("MR_NO_PAIR_LIST")) return;
     memcpy(&h, &j->key[2], 8);
     snprintf(path, sizeof path, "%s/progs.txt", g_shd_dir);
     EnterCriticalSection(&g_shw_lock);
@@ -1721,7 +1721,7 @@ static void pw_job(ShJob *j, GLuint pipe, GLuint empty_fs) {
         if (g_fdlog) printf("fd-warm: %016llx %x %016llx %x mask %x kind %d %.1f ms frame %lld%c", (unsigned long long)vh, vl, (unsigned long long)fh, fl, mask, j->stage, (double)dt * 1000.0 / (double)freq, (long long)g_st.frames, 10);
         glUseProgramStages(pipe, 1, 0);
         glUseProgramStages(pipe, 2, 0);
-        if (j->stage == 3 && !getenv("WT_NO_PAIR_LIST")) {          /* into <cache>/pairs.txt (same line format as prec_note) */
+        if (j->stage == 3 && !getenv("MR_NO_PAIR_LIST")) {          /* into <cache>/pairs.txt (same line format as prec_note) */
             char path[260];
             snprintf(path, sizeof path, "%s/pairs.txt", g_shd_dir);
             EnterCriticalSection(&g_shw_lock);
@@ -1764,7 +1764,7 @@ unsigned nvn_gl_held_ms(void) {
 /* Render thread, before a present: hold it while cold shader work is pending (see above). */
 static void pw_gate(void) {
     static int off = -1;
-    if (off < 0) { const char *e = getenv("WT_PAIR_GATE"); off = (e && !strcmp(e, "0")) || !pw_mode(); }
+    if (off < 0) { const char *e = getenv("MR_PAIR_GATE"); off = (e && !strcmp(e, "0")) || !pw_mode(); }
     if (off || !g_pw_cold) return;
     if (g_shw_queued == g_shw_done || g_shw_ctx_failed) { InterlockedExchange(&g_pw_cold, 0); return; }
     LONG64 t0 = pf_now(), last = t0, freq, start_done = g_shw_done;
@@ -1805,7 +1805,7 @@ static DWORD WINAPI shd_worker(LPVOID arg) {
     if (!rc || !wglMakeCurrent(dc, rc)) { InterlockedIncrement(&g_shw_ctx_failed); return 0; }
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     GLuint pw_pipe = 0, pw_empty = 0;                  /* P3 round 4: the pair jobs draw one discarded point through this pipeline */
-    if (!getenv("WT_GL_DRIVER_THREAD")) { glEnable(GL_DEBUG_OUTPUT_); glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_); }
+    if (!getenv("MR_GL_DRIVER_THREAD")) { glEnable(GL_DEBUG_OUTPUT_); glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_); }
     {   static const char *const src[1] = {"#version 450\nvoid main() {}\n"};
         static const float zero[64];
         GLuint vb = 0;
@@ -1834,7 +1834,7 @@ static DWORD WINAPI shd_worker(LPVOID arg) {
         if (j->cdata_size) { in.cdata = j->data + j->code_len; in.cdata_size = j->cdata_size; }
         in.binding_base = (unsigned)j->stage * 20; in.ssbo_base = 40 + (unsigned)j->stage * 16;
         in.int_attrs = j->key[0]; in.sint_attrs = j->key[1]; in.int_tex = j->key[2]; in.sint_tex = j->key[3];
-        in.fragdebug = getenv("WT_FRAGDEBUG") != NULL;
+        in.fragdebug = getenv("MR_FRAGDEBUG") != NULL;
         if (mx_translate(&in, &out)) {
             char path[320];
             size_t len = strlen(out.glsl);
@@ -1856,13 +1856,13 @@ static DWORD WINAPI shd_worker(LPVOID arg) {
     }
 }
 static void shd_workers_start(void) {
-    const char *e = getenv("WT_SHADER_WORKERS");
+    const char *e = getenv("MR_SHADER_WORKERS");
     g_shw_n = e ? atoi(e) : 3;
     if (g_shw_n < 0) g_shw_n = 0;
     if (g_shw_n > 8) g_shw_n = 8;
     InitializeCriticalSection(&g_shw_lock);
     for (int i = 0; i < 64; i++) InitializeCriticalSection(&g_pw_stripe[i]);
-    if (!getenv("WT_NO_SHADER_VARIANTS")) shv_load();
+    if (!getenv("MR_NO_SHADER_VARIANTS")) shv_load();
     g_shw_sem = CreateSemaphoreA(NULL, 0, 0x7fffffff, NULL);
     for (int i = 0; i < g_shw_n; i++) CloseHandle(CreateThread(NULL, 0, shd_worker, NULL, 0, NULL));
 }
@@ -1903,10 +1903,10 @@ static void shd_prewarm(int stage, const uint8_t *code, int code_len, const uint
      * stages that were never compiled on this PC; without this the game finished loading while the workers were still
      * compiling, and the first draws compiled the same stages again on the render thread, in the middle of the battle
      * (7 vertex stages, 5.3 s, tests/logs/p3b_r2a.log). On the console the program is ready when this call returns; here
-     * the loading takes as long as the compiler needs, once per stage per PC. WT_SHADER_NOWAIT=1 = never hold. */
+     * the loading takes as long as the compiler needs, once per stage per PC. MR_SHADER_NOWAIT=1 = never hold. */
     {
         static int nowait = -1;
-        if (nowait < 0) nowait = getenv("WT_SHADER_NOWAIT") != NULL;
+        if (nowait < 0) nowait = getenv("MR_SHADER_NOWAIT") != NULL;
         if (!nowait && g_st.frames >= 300 && GetCurrentThreadId() != g_render_tid && g_shw_queued - g_shw_done >= g_shw_n) {
             LONG64 t0 = pf_now(), freq = 0;
             { LARGE_INTEGER f; QueryPerformanceFrequency(&f); freq = f.QuadPart; }
@@ -1915,7 +1915,7 @@ static void shd_prewarm(int stage, const uint8_t *code, int code_len, const uint
         }
     }
 }
-/* ---- P3 round 3: linked program pairs (WT_PAIR=1; default off until measured)
+/* ---- P3 round 3: linked program pairs (MR_PAIR=1; default off until measured)
  * The two stages of a draw are separable programs in one pipeline object, and this driver does its last piece of work
  * for a (vertex, fragment) combination inside the first draw call that uses it (50-90 ms; it keeps the result in a
  * cache of its own that depends on the name of the executable). Here the same two TEXTS are also linked into one
@@ -1924,7 +1924,7 @@ static void shd_prewarm(int stage, const uint8_t *code, int code_len, const uint
  * program when it is there (same shaders, same bindings: every binding is fixed by a layout qualifier in the text; the
  * only uniform, the alpha test at location 0, is set on whichever program is in use); when the binary is not on disk
  * yet the draw goes through the pipeline exactly as before and the pair is linked for the next time. */
-static int pair_mode(void) { static int m = -1; if (m < 0) { const char *e = getenv("WT_PAIR"); m = e ? atoi(e) : 0; } return m; }
+static int pair_mode(void) { static int m = -1; if (m < 0) { const char *e = getenv("MR_PAIR"); m = e ? atoi(e) : 0; } return m; }
 typedef struct { uint64_t key; GLuint prog; int state; } PairEnt;      /* state 0 = free, 1 = ready, 2 = no linked program (pipeline) */
 static PairEnt g_pairs[16384];
 static LONG64 g_pair_loaded, g_pair_linked, g_pair_failed, g_pair_draws, g_pair_refused;
@@ -2052,7 +2052,7 @@ static int prec_has(uint64_t vh, uint32_t vl, uint64_t fh, uint32_t fl, uint32_t
 /* Render thread, at a draw through the pipeline: note the pair of GL stage programs (fs_empty: depth-only pass). */
 static void prec_note(GLuint vs, GLuint fs, int fs_empty, uint32_t mask) {
     static uint64_t seen[1 << 15];
-    if (g_prec_off < 0) g_prec_off = getenv("WT_NO_PAIR_LIST") != NULL || g_shd_mode <= 0;
+    if (g_prec_off < 0) g_prec_off = getenv("MR_NO_PAIR_LIST") != NULL || g_shd_mode <= 0;
     if (g_prec_off || fs >= 65536) return;
     uint64_t pair = ((uint64_t)vs << 32) | (uint64_t)(mask & 0xffff) << 16 | fs | 1ull << 63;
     unsigned h = (unsigned)((pair * 0x9E3779B97F4A7C15ULL) >> 49);
@@ -2068,7 +2068,7 @@ static void prec_note(GLuint vs, GLuint fs, int fs_empty, uint32_t mask) {
 /* Render thread: a compute program was built (its first dispatch follows). List line: <hash> <length> 0 0 10000. */
 static void prec_note_compute(uint64_t h, size_t len) {
     char path[260];
-    if (g_prec_off < 0) g_prec_off = getenv("WT_NO_PAIR_LIST") != NULL || g_shd_mode <= 0;
+    if (g_prec_off < 0) g_prec_off = getenv("MR_NO_PAIR_LIST") != NULL || g_shd_mode <= 0;
     if (g_prec_off || prec_has(h, (uint32_t)len, 0, 0, 0x10000, 1)) return;
     snprintf(path, sizeof path, "%s/pairs.txt", g_shd_dir);
     FILE *f = fopen(path, "a");
@@ -2078,7 +2078,7 @@ static void prec_note_compute(uint64_t h, size_t len) {
 static LONG64 g_pre_n, g_pre_ticks;
 static void prec_preload(int stage, uint64_t h, uint32_t len) {
     static int off = -1;
-    if (off < 0) { const char *e = getenv("WT_PAIR_PRELOAD"); off = (e && !strcmp(e, "0")) || g_shc_off > 0 || getenv("WT_NO_SHADERCACHE") != NULL; }
+    if (off < 0) { const char *e = getenv("MR_PAIR_PRELOAD"); off = (e && !strcmp(e, "0")) || g_shc_off > 0 || getenv("MR_NO_SHADERCACHE") != NULL; }
     if (off || !len) return;
     for (ShSrc *e = g_shs[h & 4095]; e; e = e->next) if (e->h == h && e->len == len) return;
     LONG64 t0 = pf_now();
@@ -2092,7 +2092,7 @@ static void prec_preload(int stage, uint64_t h, uint32_t len) {
 }
 static void prec_load(void) {                      /* render thread, once (shd_init) */
     char path[260], line[200];
-    if (g_prec_off < 0) g_prec_off = getenv("WT_NO_PAIR_LIST") != NULL || g_shd_mode <= 0;
+    if (g_prec_off < 0) g_prec_off = getenv("MR_NO_PAIR_LIST") != NULL || g_shd_mode <= 0;
     if (g_prec_off) return;
     snprintf(path, sizeof path, "%s/pairs.txt", g_shd_dir);
     FILE *f = fopen(path, "r");
@@ -2121,7 +2121,7 @@ static int stage_glsl(Prog *p, int s, const uint32_t *key) {
     uint32_t dep_a = s == 0 ? st->glsl_dep : 0;
     if (st->glsl_state == 1 && ((key[0] ^ st->glsl_key[0]) & dep_a) == 0 && ((key[1] ^ st->glsl_key[1]) & dep_a) == 0 &&
         ((key[2] ^ st->glsl_key[2]) & st->glsl_tex) == 0 && ((key[3] ^ st->glsl_key[3]) & st->glsl_tex) == 0) return 1;
-    if (g_shc_off < 0) g_shc_off = getenv("WT_NO_SHADERCACHE") != NULL;
+    if (g_shc_off < 0) g_shc_off = getenv("MR_NO_SHADERCACHE") != NULL;
     if (st->glsl && g_shc_off) glDeleteProgram(st->glsl);
     st->glsl = 0;
     memset(&in, 0, sizeof in);
@@ -2144,7 +2144,7 @@ static int stage_glsl(Prog *p, int s, const uint32_t *key) {
     }
     in.int_attrs = key[0]; in.sint_attrs = key[1]; in.int_tex = key[2]; in.sint_tex = key[3];
     in.binding_base = (unsigned)s * 20; in.ssbo_base = 40 + (unsigned)s * 16;
-    in.fragdebug = getenv("WT_FRAGDEBUG") != NULL;
+    in.fragdebug = getenv("MR_FRAGDEBUG") != NULL;
     LONG64 pf0 = pf_now();
     int xl;
     { HS_IN("shader translate (machine code to GLSL)", 0); xl = mx_translate(&in, &out); HS_OUT(); }
@@ -2156,7 +2156,7 @@ static int stage_glsl(Prog *p, int s, const uint32_t *key) {
         return 0;
     }
     char *src = out.glsl;
-    const char *dir = getenv("WT_SHADERDUMP");
+    const char *dir = getenv("MR_SHADERDUMP");
     if (dir) {
         char path[260];
         snprintf(path, sizeof path, "%s/b%05d_%s.glsl", dir, p->serial, k_stage_name[s]);
@@ -2362,7 +2362,7 @@ static GLenum blend_func(unsigned f) {
 }
 /* NVNdrawPrimitive has the OpenGL values for 0..9 (points .. polygon); adjacency 10..13 and patches 14 map to the GL enums.
  * Winding: glClipControl(GL_UPPER_LEFT) keeps OpenGL's rule (facing is decided as with a lower-left origin), and NVN is taken to
- * behave the same; WT_FLIPFACE inverts it for experiments (WT_DRAWLOG shows the samples each draw produces). */
+ * behave the same; MR_FLIPFACE inverts it for experiments (MR_DRAWLOG shows the samples each draw produces). */
 static GLenum nvn_prim(unsigned p) {
     static const GLenum m[15] = {GL_POINTS, GL_LINES, GL_LINE_LOOP, GL_LINE_STRIP, GL_TRIANGLES, GL_TRIANGLE_STRIP, GL_TRIANGLE_FAN, GL_QUADS, GL_QUAD_STRIP, GL_POLYGON,
                                  0x000A, 0x000B, 0x000C, 0x000D, 0x000E};
@@ -2422,17 +2422,17 @@ static void bind_handle_table(int s, GLenum target, GLuint index, int skip) {
     }
     glBindBufferRange(target, index, g_arena, (ptrdiff_t)S.tex_off[s] + skip, skip ? (ptrdiff_t)256 : (ptrdiff_t)sizeof S.gl_tex[s]);
 }
-/* Debug aid WT_DRAWLOG=<frame>: state of every draw of that frame, and how many samples each draw produced. */
+/* Debug aid MR_DRAWLOG=<frame>: state of every draw of that frame, and how many samples each draw produced. */
 static LONG64 g_prev_frame_draws, g_drawlog_frame = -1, g_disp_frames, g_frame_dispatch;
-static int g_drawlog_mindisp_n;     /* with WT_DRAWLOG_MIN=<n>: the first frame from <frame> on that follows a frame of at least n draws */
+static int g_drawlog_mindisp_n;     /* with MR_DRAWLOG_MIN=<n>: the first frame from <frame> on that follows a frame of at least n draws */
 static int drawlog_now(void) {
     static int drawlog = -2, mindraws, mindisp;
     if (drawlog == -2) {
-        drawlog = getenv("WT_DRAWLOG") ? atoi(getenv("WT_DRAWLOG")) : -1; mindraws = getenv("WT_DRAWLOG_MIN") ? atoi(getenv("WT_DRAWLOG_MIN")) : 0;
-        mindisp = getenv("WT_DRAWLOG_MINDISP") ? atoi(getenv("WT_DRAWLOG_MINDISP")) : 0;
+        drawlog = getenv("MR_DRAWLOG") ? atoi(getenv("MR_DRAWLOG")) : -1; mindraws = getenv("MR_DRAWLOG_MIN") ? atoi(getenv("MR_DRAWLOG_MIN")) : 0;
+        mindisp = getenv("MR_DRAWLOG_MINDISP") ? atoi(getenv("MR_DRAWLOG_MINDISP")) : 0;
     }
     if (drawlog < 0) return 0;
-    if (mindisp) {                             /* WT_DRAWLOG_MINDISP=<n>: WT_DRAWLOG then counts the frames that had at least n compute dispatches */
+    if (mindisp) {                             /* MR_DRAWLOG_MINDISP=<n>: MR_DRAWLOG then counts the frames that had at least n compute dispatches */
         if (g_drawlog_frame < 0 && g_disp_frames >= drawlog) g_drawlog_frame = g_st.frames;
         return g_st.frames == g_drawlog_frame;
     }
@@ -2455,7 +2455,7 @@ static struct { uint64_t addr, size; int prog, n; } g_crange[1024];       /* sto
 static int g_ncrange;
 static int crange_hit(uint64_t addr, uint64_t size);
 static void compute_flush(void);
-static int g_dbg_noscissor, g_dbg_skipdraw = -1, g_frame_draw_index;      /* debug aids: WT_NOSCISSOR=1, WT_SKIPDRAW=<n-th draw of every frame> */
+static int g_dbg_noscissor, g_dbg_skipdraw = -1, g_frame_draw_index;      /* debug aids: MR_NOSCISSOR=1, MR_SKIPDRAW=<n-th draw of every frame> */
 /* Audit measurement (fake audit, row "unbound or dead texture slots sample a 1x1 dummy texture"): draws whose bound
  * programs reference a texture unit (MxOut.tex_units of the translated stage) that holds the dummy texture; split by cause:
  * the game bound handle 0 to the unit / never bound it, or the handle names a texture that is gone or was never registered. */
@@ -2635,8 +2635,8 @@ static int draw_prepare(void) {
                 if (S.ubo[s][n].addr && S.prog[s] && (S.prog[s]->st[s].glsl_cbufs >> (n + 3) & 1)) {
                     const float *f = P(S.ubo[s][n].addr);
                     printf("    c%d:", n);
-                    static int full = -1;              /* WT_DRAWLOG_FULL=1: every float of the buffer, not the first 24 */
-                    if (full < 0) full = getenv("WT_DRAWLOG_FULL") != NULL;
+                    static int full = -1;              /* MR_DRAWLOG_FULL=1: every float of the buffer, not the first 24 */
+                    if (full < 0) full = getenv("MR_DRAWLOG_FULL") != NULL;
                     for (unsigned k = 0; k < (full ? 1024u : 24u) && k * 4 < S.ubo[s][n].size; k++) printf(" %g", f[k]);
                     printf("\n");
                 }
@@ -2687,7 +2687,7 @@ static int draw_prepare(void) {
  * per mesh one dispatch reads bind-pose vertices and bone matrices and writes posed vertices into a storage buffer that later
  * draws bind as a vertex buffer. Storage buffers are guest memory: a buffer the program writes is copied into a GL buffer,
  * the dispatch runs, and the result is copied back to guest memory, where the CPU and later draws read it.
- * Debug aids: WT_NOCOMPUTE=1 skips every dispatch (the state before this was implemented); the draw log (WT_DRAWLOG)
+ * Debug aids: MR_NOCOMPUTE=1 skips every dispatch (the state before this was implemented); the draw log (MR_DRAWLOG)
  * also lists every dispatch of the frame with its buffers, and marks vertex buffers that a dispatch of the frame wrote. */
 static int g_dbg_nocompute;
 static struct { int serial; LONG64 calls, run, groups; } g_chist[64];
@@ -2789,7 +2789,7 @@ static int stage_glsl_compute(Prog *p) {
         logf_limited(&nfail, 60, "nvn_gl: program #%d compute stage: machine code not translated: %s\n", p->serial, out.why);
         return 0;
     }
-    const char *dir = getenv("WT_SHADERDUMP");
+    const char *dir = getenv("MR_SHADERDUMP");
     if (dir) {
         char path[260];
         snprintf(path, sizeof path, "%s/b%05d_compute.glsl", dir, p->serial);
@@ -2880,7 +2880,7 @@ static void compute_dispatch(unsigned gx, unsigned gy, unsigned gz) {
     int text = st->state == 1 || st->state == 2, glsl = 0;
     if (st->state == 4 && g_chist[h].calls <= 2) log = 1;         /* the first dispatches of every machine-code program are always described */
     uint32_t used = 0, written = 0;
-    { static int mc = -1; if (mc < 0) mc = getenv("WT_COMPUTE_MC") != NULL; if (mc && text && st->code) text = 0; }      /* run the translated machine code instead of the text */
+    { static int mc = -1; if (mc < 0) mc = getenv("MR_COMPUTE_MC") != NULL; if (mc && text && st->code) text = 0; }      /* run the translated machine code instead of the text */
     if (text && !g_dbg_nocompute && !stage_ready(p, 5)) text = 0;
     if (text) { used = st->storage; written = st->storage_w; }
     else if (!g_dbg_nocompute && stage_glsl_compute(p)) { glsl = 1; used = st->glsl_ssbos; written = st->glsl_ssbo_w; }
@@ -2945,7 +2945,7 @@ static void compute_dispatch(unsigned gx, unsigned gy, unsigned gz) {
         glDisable(GL_COMPUTE_PROGRAM_NV_);
         compute_bind_glsl(p);
     }
-    nvn_front_ccmp_dispatch(S.ubo[5], S.ssbo[5], written, st->code, st->code_len, gx, gy, gz);      /* WT_COMPUTE_CMP */
+    nvn_front_ccmp_dispatch(S.ubo[5], S.ssbo[5], written, st->code, st->code_len, gx, gy, gz);      /* MR_COMPUTE_CMP */
     glDispatchCompute(gx, gy, gz);
     if (glsl && st->glsl_images_w) glMemoryBarrier(0xffffffffu);
     if (written) {
@@ -3042,30 +3042,30 @@ static void blit_tex(Tex *src, const View *sv, const int *sr, Tex *dst, const Vi
 
 static void replay(uint64_t handle, int depth);
 static void save_bmp(const char *path, Tex *t);
-/* Round 17, TEST ONLY (nvn_dt.h): WT_DRAWTAG=1 with WT_SHOT_FIGHT: the submissions the game queues between the pad poll
+/* Round 17, TEST ONLY (nvn_dt.h): MR_DRAWTAG=1 with MR_SHOT_FIGHT: the submissions the game queues between the pad poll
  * that reached a wanted fight frame and the present that is saved are "tagged": g_draw_tag = that fight frame while the
  * render thread replays them (set by a job queued before the submission, cleared by the back end at the present). */
 #include "nvn_dt.h"
 static int g_draw_tag, g_dt_idx;                 /* render thread */
 volatile LONG g_drawtag_next;                    /* game thread: the fight frame the next submission belongs to, 0 = not tagged */
 static void *dt_host(uint64_t a) { return P(a); }
-static int drawtag_env(void) { static int on = -1; if (on < 0) on = getenv("WT_DRAWTAG") != NULL; return on; }
+static int drawtag_env(void) { static int on = -1; if (on < 0) on = getenv("MR_DRAWTAG") != NULL; return on; }
 static void job_drawtag(void *arg) { int n = *(int *)arg; if (g_draw_tag != n) { g_draw_tag = n; g_dt_idx = 0; printf("DT begin: the commands of fight frame %d (%s)\n", n, g_vk ? "Vulkan" : "OpenGL"); } }
 int nvn_front_draw_tag(void) { return g_draw_tag; }
 int nvn_front_draw_tag_next(void) { return g_dt_idx++; }
 void nvn_front_draw_tag_clear(void) { if (g_draw_tag) { printf("DT end: fight frame %d, %d draw commands\n", g_draw_tag, g_dt_idx); g_draw_tag = 0; } }
-/* Debug aid WT_DRAWSHOT=<frame>: the colour target after every draw of that frame, as draw_<n>.bmp. */
+/* Debug aid MR_DRAWSHOT=<frame>: the colour target after every draw of that frame, as draw_<n>.bmp. */
 static void draw_shot(void) {
     static int want = -2;
     Tex fake;
     char path[64];
-    if (want == -2) want = getenv("WT_DRAWSHOT") ? atoi(getenv("WT_DRAWSHOT")) : -1;
-    if ((g_st.frames != want && !(g_draw_tag && getenv("WT_DRAWSHOT_BOX"))) || !S.fbo_w) return;      /* round 17: with WT_DRAWTAG the box aid follows the tagged fight frame */
-    {   /* WT_DRAWSHOT_BOX=x,y,w,h (in 1920x1080 picture coordinates): no files; one line per draw that CHANGED the mean
+    if (want == -2) want = getenv("MR_DRAWSHOT") ? atoi(getenv("MR_DRAWSHOT")) : -1;
+    if ((g_st.frames != want && !(g_draw_tag && getenv("MR_DRAWSHOT_BOX"))) || !S.fbo_w) return;      /* round 17: with MR_DRAWTAG the box aid follows the tagged fight frame */
+    {   /* MR_DRAWSHOT_BOX=x,y,w,h (in 1920x1080 picture coordinates): no files; one line per draw that CHANGED the mean
          * colour of that box of its colour target (finds the draws that paint a given place of the screen) */
         static int box[4] = {-1, 0, 0, 0};
         static unsigned last_fbo; static double last[4];
-        if (box[0] == -1) { const char *e = getenv("WT_DRAWSHOT_BOX"); box[0] = -2; if (e && sscanf(e, "%d,%d,%d,%d", &box[0], &box[1], &box[2], &box[3]) != 4) box[0] = -2; }
+        if (box[0] == -1) { const char *e = getenv("MR_DRAWSHOT_BOX"); box[0] = -2; if (e && sscanf(e, "%d,%d,%d,%d", &box[0], &box[1], &box[2], &box[3]) != 4) box[0] = -2; }
         if (box[0] >= 0) {
             int x = box[0] * S.fbo_w / 1920, y = box[1] * S.fbo_h / 1080, w = box[2] * S.fbo_w / 1920, h = box[3] * S.fbo_h / 1080;
             if (w < 1 || h < 1 || x + w > S.fbo_w || y + h > S.fbo_h) return;
@@ -3089,7 +3089,7 @@ static void draw_shot(void) {
     glBindFramebuffer(GL_READ_FRAMEBUFFER_, S.fbo);
     save_bmp(path, &fake);
 }
-/* P3 round 2, EXPERIMENT, off by default (WT_FIRSTDRAW_WARM=1 turns it on): the first draw with a pair of GLSL
+/* P3 round 2, EXPERIMENT, off by default (MR_FIRSTDRAW_WARM=1 turns it on): the first draw with a pair of GLSL
  * programs is preceded by one point drawn with the rasterizer off. Result: it does NOT remove the cost, it only moves it.
  * The driver spends 50-90 ms inside the first draw call of 48-93 of the 420-520 program pairs of a run (3.4-6.2 s per
  * run); with the point, that time is spent in the point instead (tests/logs/p3b_r2c.log: 48 points over 4 ms, 3,979 ms).
@@ -3102,7 +3102,7 @@ static LONG64 g_fdw_n, g_fdw_slow, g_fdw_skipped, g_fdw_ticks;
 static void first_draw_warm(void) {
     static uint64_t seen[1 << 16];
     static int off = -1;
-    if (off < 0) off = getenv("WT_FIRSTDRAW_WARM") == NULL;
+    if (off < 0) off = getenv("MR_FIRSTDRAW_WARM") == NULL;
     if (off || !g_gs_last_prog[0]) return;
     uint64_t pair = ((uint64_t)g_gs_last_prog[0] << 32) | g_gs_last_prog[1] | 1ull << 63;
     unsigned h = (unsigned)((pair * 0x9E3779B97F4A7C15ULL) >> 48);
@@ -3119,7 +3119,7 @@ static void first_draw_warm(void) {
     LONG64 dt = pf_now() - t0;
     g_fdw_n++; g_fdw_ticks += dt; g_fdw_slow += dt * 250 >= freq;
 }
-/* WT_HITCH: a draw call that took more than 4 ms, and whether it was the first draw with this pair of programs. */
+/* MR_HITCH: a draw call that took more than 4 ms, and whether it was the first draw with this pair of programs. */
 static void hitch_draw(LONG64 t0) {
     static uint64_t seen[1 << 16];
     static LONG64 freq, n_first, n_first_slow, n_old_slow;
@@ -3351,7 +3351,7 @@ static void exec(const Cmd *m, int depth) {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER_, g_arena);
         pf_add(PF_PREP, pf0);
         if (drawlog_now()) printf("  DrawElements mode %d type %d count %d base vertex %d base instance %d instances %d%c", (int)a[0], (int)t, count, (int)a[4], (int)a[5], (int)a[6], 10);
-        if (getenv("WT_DRAWSHOT_CLEAR") && getenv("WT_DRAWSHOT") && g_st.frames == atoi(getenv("WT_DRAWSHOT"))) { glDisable(GL_SCISSOR_TEST); glClearColor(0, 0, 0, 0); glClear(GL_COLOR_BUFFER_BIT); glEnable(GL_SCISSOR_TEST); }
+        if (getenv("MR_DRAWSHOT_CLEAR") && getenv("MR_DRAWSHOT") && g_st.frames == atoi(getenv("MR_DRAWSHOT"))) { glDisable(GL_SCISSOR_TEST); glClearColor(0, 0, 0, 0); glClear(GL_COLOR_BUFFER_BIT); glEnable(GL_SCISSOR_TEST); }
         drawlog_begin();
         first_draw_warm();
         pf0 = pf_now();
@@ -3675,7 +3675,7 @@ static int pf_cmp_d(const void *a, const void *b) { double x = *(const double *)
 #define printf rpt_printf                  /* [Recomps#1] to the #undef below: the reports go out in one write each (hostrt.c rpt_begin) */
 static void pf_threads(double frames) {
 #ifndef _WIN32
-    {   /* [witchtime] Linux: the threads' CPU time from /proc/self/task/<tid>/stat (user + system, clock ticks) in 100 ns units as on Windows */
+    {   /* [moonriver] Linux: the threads' CPU time from /proc/self/task/<tid>/stat (user + system, clock ticks) in 100 ns units as on Windows */
         struct { DWORD tid; double ms; } top[512];
         int n = 0;
         double total = 0, tick = 1e7 / (double)sysconf(_SC_CLK_TCK);
@@ -3759,15 +3759,15 @@ static void pf_frame_mark(LONG64 frame) {
     if (!freq) { LARGE_INTEGER f; QueryPerformanceFrequency(&f); freq = f.QuadPart; }
     if (last) g_pf_ft[frame % 300] = (double)(now - last) * 1000.0 / (double)freq;
     if (last && g_hitch_ms) hitch_frame((long long)frame, (double)(now - last) * 1000.0 / (double)freq, g_frame_dispatch > 0);
-    {   /* [witchtime] TEST ONLY: WT_FRAMETIMES=<file>: a line per frame "<frame> <ms since the previous one> <present interval the game asked for> <wall clock s>" */
+    {   /* [moonriver] TEST ONLY: MR_FRAMETIMES=<file>: a line per frame "<frame> <ms since the previous one> <present interval the game asked for> <wall clock s>" */
         static FILE *ftf; static int fto;
-        if (!fto) { const char *e = getenv("WT_FRAMETIMES"); fto = 1; if (e) ftf = fopen(e, "w"); }
+        if (!fto) { const char *e = getenv("MR_FRAMETIMES"); fto = 1; if (e) ftf = fopen(e, "w"); }
         int display_interval(void);
         if (ftf && last) { struct timespec ts; timespec_get(&ts, TIME_UTC); fprintf(ftf, "%lld %.3f %d %.3f\n", (long long)frame, (double)(now - last) * 1000.0 / (double)freq, display_interval(), (double)ts.tv_sec + ts.tv_nsec / 1e9); }
         if (ftf && frame % 300 == 0) fflush(ftf);
     }
     last = now;
-    if (g_joblog_frame > 0 && frame == g_joblog_frame + g_joblog_frames) joblog_print();      /* WT_JOBLOG */
+    if (g_joblog_frame > 0 && frame == g_joblog_frame + g_joblog_frames) joblog_print();      /* MR_JOBLOG */
     if (frame % 300) return;
     rpt_begin();
     double ft[300], sum = 0;
@@ -3805,13 +3805,13 @@ static void pf_frame_mark(LONG64 frame) {
         static LONG64 lf[12];
         LONG64 f[12];
         for (int i = 0; i < 12; i++) { f[i] = g_fs[i] - lf[i]; lf[i] += f[i]; }
-        printf(" || answered on the game's thread (WT_FASTSYNC=%d): SyncWait window %.2f, SyncWait finished %.2f, QueueWaitSync never fenced %.2f, finished %.2f; SyncWait on a fence run but not finished, waited for there %.2f (%.2f ms), polls with timeout 0 answered there %.2f | jobs all the same: SyncWait on a fence not run yet %.2f, run but not finished %.2f (by then the jobs posted before it had run, or the render thread was idle), with a timeout under 1 s %.2f, other %.2f, QueueWaitSync %.2f\n",
+        printf(" || answered on the game's thread (MR_FASTSYNC=%d): SyncWait window %.2f, SyncWait finished %.2f, QueueWaitSync never fenced %.2f, finished %.2f; SyncWait on a fence run but not finished, waited for there %.2f (%.2f ms), polls with timeout 0 answered there %.2f | jobs all the same: SyncWait on a fence not run yet %.2f, run but not finished %.2f (by then the jobs posted before it had run, or the render thread was idle), with a timeout under 1 s %.2f, other %.2f, QueueWaitSync %.2f\n",
                g_fastsync > 0, (double)f[0] / 300.0, (double)f[1] / 300.0, (double)f[2] / 300.0, (double)f[3] / 300.0, (double)f[8] / 300.0, (double)f[9] * ms, (double)f[11] / 300.0, (double)f[4] / 300.0, (double)f[5] / 300.0, (double)f[10] / 300.0, (double)f[6] / 300.0, (double)f[7] / 300.0);
     }
     {
         static int on = -1;
         static LONG64 z[16];
-        if (on < 0) on = getenv("WT_GLSTATS") != NULL;
+        if (on < 0) on = getenv("MR_GLSTATS") != NULL;
         if (on) {
             LONG64 v[16] = {g_gs_draws, g_gs_prog_same, g_gs_attr_set, g_gs_attr_same, g_gs_vbuf_bind, g_gs_buf_bind, g_st.tex_created, g_st.tex_uploads, g_st.fbo_made, g_st.views,
                             g_st.handles, g_shc_compiled, g_shd_loaded, g_shc_hit, g_pfn[PF_CFLUSH], g_pfn[PF_WAIT_SUBMIT] + g_pfn[PF_WAIT_PRESENT] + g_pfn[PF_WAIT_OTHER]};
@@ -3836,10 +3836,10 @@ static void job_fence(void *arg);
 static void job_sync_wait(void *arg);
 static void job_flush(void *arg);
 static void job_finish(void *arg);
-/* WT_JOBLOG=<frame>[,<frames>] (default 3 frames): every job of those frames, as it is posted (gl_post), posted and
+/* MR_JOBLOG=<frame>[,<frames>] (default 3 frames): every job of those frames, as it is posted (gl_post), posted and
  * waited for (gl_run: "wait", then "resumed" when the caller runs again), begun and ended by the render thread; kept in
  * memory and printed after the last of those frames ("joblog:" lines, time in ms since the first event, the thread, the
- * sync object of a fence / wait). WT_JOBLOG=slow,<ms>[,<count>] (finding 138): the same events kept in a ring, and the
+ * sync object of a fence / wait). MR_JOBLOG=slow,<ms>[,<count>] (finding 138): the same events kept in a ring, and the
  * last 25 ms of them printed when a game thread was blocked in a job longer than <ms> (the first <count> times, default 5). */
 #define JL_MAX 8192
 static struct { LONG64 t, frame; unsigned long tid; const char *ev, *name; const void *obj; void (*fn)(void *); } g_jl[JL_MAX];
@@ -3913,7 +3913,7 @@ static void job_present(void *arg) {
     RECT r;
     LONG64 frame = g_st.frames + 1;
     LONG64 pf0 = pf_now();
-    if (shot == -2) { shot = getenv("WT_SHOT") ? atoi(getenv("WT_SHOT")) : -1; every = getenv("WT_SHOT_EVERY") ? atoi(getenv("WT_SHOT_EVERY")) : 0; shot_from = getenv("WT_SHOT_FROM") ? atoi(getenv("WT_SHOT_FROM")) : 0; }
+    if (shot == -2) { shot = getenv("MR_SHOT") ? atoi(getenv("MR_SHOT")) : -1; every = getenv("MR_SHOT_EVERY") ? atoi(getenv("MR_SHOT_EVERY")) : 0; shot_from = getenv("MR_SHOT_FROM") ? atoi(getenv("MR_SHOT_FROM")) : 0; }
     GetClientRect(g_hwnd, &r);
     glDisable(GL_SCISSOR_TEST);
     glDisable(GL_FRAMEBUFFER_SRGB_);
@@ -3925,16 +3925,16 @@ static void job_present(void *arg) {
         glFramebufferTexture(GL_READ_FRAMEBUFFER_, GL_COLOR_ATTACHMENT0_, t->o.gl, 0);
         glBlitFramebuffer(sr[0], sr[1], sr[0] + sr[2], sr[1] + sr[3], 0, r.bottom, r.right, 0, GL_COLOR_BUFFER_BIT, GL_LINEAR);
         if (g_drawlog_frame >= 0 && frame == g_drawlog_frame + 1) save_bmp("frame_drawlog.bmp", t);      /* the frame the draw log describes */
-        { int step = nvn_front_take_step_shot(); if (step) { char path[300]; const char *dir = getenv("WT_SHOT_DIR"); snprintf(path, sizeof path, "%s%sstep_%03d.bmp", dir ? dir : "", dir ? "/" : "", step - 1); save_bmp(path, t); } }
+        { int step = nvn_front_take_step_shot(); if (step) { char path[300]; const char *dir = getenv("MR_SHOT_DIR"); snprintf(path, sizeof path, "%s%sstep_%03d.bmp", dir ? dir : "", dir ? "/" : "", step - 1); save_bmp(path, t); } }
         nvn_front_draw_tag_clear();
-        if (j->shot_fight) { char path[300]; const char *dir = getenv("WT_SHOT_DIR"); snprintf(path, sizeof path, "%s%sfight_%05d.bmp", dir ? dir : "", dir ? "/" : "", j->shot_fight); save_bmp(path, t); printf("shot: fight frame %d saved at presented frame %lld (OpenGL)\n", j->shot_fight, (long long)frame); }
+        if (j->shot_fight) { char path[300]; const char *dir = getenv("MR_SHOT_DIR"); snprintf(path, sizeof path, "%s%sfight_%05d.bmp", dir ? dir : "", dir ? "/" : "", j->shot_fight); save_bmp(path, t); printf("shot: fight frame %d saved at presented frame %lld (OpenGL)\n", j->shot_fight, (long long)frame); }
         if (frame == shot || (every > 0 && frame >= shot_from && frame % every == 0)) {
             char path[300];
-            const char *dir = getenv("WT_SHOT_DIR");                /* default: the current directory */
+            const char *dir = getenv("MR_SHOT_DIR");                /* default: the current directory */
             snprintf(path, sizeof path, "%s%sframe_%lld.bmp", dir ? dir : "", dir ? "/" : "", (long long)frame);
             save_bmp(path, t);
         }
-        if (getenv("WT_RTDUMP") && frame == atoi(getenv("WT_RTDUMP"))) {       /* debug: every colour target in use, as rt_<n>.bmp */
+        if (getenv("MR_RTDUMP") && frame == atoi(getenv("MR_RTDUMP"))) {       /* debug: every colour target in use, as rt_<n>.bmp */
             for (int k = 0; k < 256; k++) {
                 Tex fake;
                 char path[64];
@@ -4040,21 +4040,21 @@ static void render_loop(void) {
 static DWORD WINAPI render_thread(LPVOID arg) {
     (void)arg;
     pf_job_submit = g_rb->submit; pf_job_present = g_rb->present;
-    g_joblog_frame = getenv("WT_JOBLOG") ? atoi(getenv("WT_JOBLOG")) : 0;
-    if (g_joblog_frame && strchr(getenv("WT_JOBLOG"), ',')) g_joblog_frames = atoi(strchr(getenv("WT_JOBLOG"), ',') + 1);
-    if (getenv("WT_JOBLOG") && !strncmp(getenv("WT_JOBLOG"), "slow,", 5)) {      /* finding 138: slow,<ms>[,<count>] */
-        const char *e = getenv("WT_JOBLOG") + 5;
+    g_joblog_frame = getenv("MR_JOBLOG") ? atoi(getenv("MR_JOBLOG")) : 0;
+    if (g_joblog_frame && strchr(getenv("MR_JOBLOG"), ',')) g_joblog_frames = atoi(strchr(getenv("MR_JOBLOG"), ',') + 1);
+    if (getenv("MR_JOBLOG") && !strncmp(getenv("MR_JOBLOG"), "slow,", 5)) {      /* finding 138: slow,<ms>[,<count>] */
+        const char *e = getenv("MR_JOBLOG") + 5;
         g_jl_slow_ms = atoi(e); g_jl_slow_left = strchr(e, ',') ? atoi(strchr(e, ',') + 1) : 5;
         if (strchr(e, ',') && strchr(strchr(e, ',') + 1, ',')) g_jl_slow_from = atoi(strchr(strchr(e, ',') + 1, ',') + 1);
         if (g_jl_slow_ms <= 0) g_jl_slow_ms = 1;
     }
     PIXELFORMATDESCRIPTOR pfd;
     g_render_tid = GetCurrentThreadId();
-    {   /* Round 17, MEASUREMENT: WT_RENDER_PRIO=1 above normal, 2 highest (default: normal, as before). The game's own
+    {   /* Round 17, MEASUREMENT: MR_RENDER_PRIO=1 above normal, 2 highest (default: normal, as before). The game's own
          * threads run above normal when the game asked for a priority under 16 (os_threads.c host_priority). */
-        const char *e = getenv("WT_RENDER_PRIO");
+        const char *e = getenv("MR_RENDER_PRIO");
         int p = e ? atoi(e) : 0;
-        if (p > 0) { SetThreadPriority(GetCurrentThread(), p >= 2 ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_ABOVE_NORMAL); printf("nvn: render thread priority %s (WT_RENDER_PRIO)\n", p >= 2 ? "highest" : "above normal"); }
+        if (p > 0) { SetThreadPriority(GetCurrentThread(), p >= 2 ? THREAD_PRIORITY_HIGHEST : THREAD_PRIORITY_ABOVE_NORMAL); printf("nvn: render thread priority %s (MR_RENDER_PRIO)\n", p >= 2 ? "highest" : "above normal"); }
     }
     if (g_vk) {                                 /* V1 step S0: no OpenGL context, no shader workers; the jobs go to nvn_vk.c (vk_route) */
         nvn_vk_init(g_hwnd);
@@ -4082,21 +4082,21 @@ static DWORD WINAPI render_thread(LPVOID arg) {
     if (missing) { printf("nvn_gl: %d required OpenGL functions are missing; this backend needs an NVIDIA driver\n", missing); fflush(stdout); ExitProcess(5); }
     BOOL (WINAPI *swap_interval)(int) = (void *)wglGetProcAddress("wglSwapIntervalEXT");
     if (swap_interval) swap_interval(0);
-    g_debug = getenv("WT_GLDEBUG") != NULL;
-    g_dbg_noscissor = getenv("WT_NOSCISSOR") != NULL;
-    g_dbg_flipface = getenv("WT_FLIPFACE") != NULL;
-    g_dbg_nocompute = getenv("WT_NOCOMPUTE") != NULL;
-    g_drawlog_mindisp_n = getenv("WT_DRAWLOG_MINDISP") ? atoi(getenv("WT_DRAWLOG_MINDISP")) : 0;
-    if (getenv("WT_SKIPDRAW")) g_dbg_skipdraw = atoi(getenv("WT_SKIPDRAW"));
+    g_debug = getenv("MR_GLDEBUG") != NULL;
+    g_dbg_noscissor = getenv("MR_NOSCISSOR") != NULL;
+    g_dbg_flipface = getenv("MR_FLIPFACE") != NULL;
+    g_dbg_nocompute = getenv("MR_NOCOMPUTE") != NULL;
+    g_drawlog_mindisp_n = getenv("MR_DRAWLOG_MINDISP") ? atoi(getenv("MR_DRAWLOG_MINDISP")) : 0;
+    if (getenv("MR_SKIPDRAW")) g_dbg_skipdraw = atoi(getenv("MR_SKIPDRAW"));
     glEnable(GL_DEBUG_OUTPUT_);
     /* P3 (hitch log, tests/logs/p3b_hitch0.log against p3b_hitch_dbg.log): without synchronous debug output this driver
      * hands the GL calls of the render thread to a thread of its own, and every call that returns something (texture
      * handles, program status, glGetError, buffer read-back) then waits for everything queued before it: 0.1-2 s frames
      * whenever a new shader or texture arrives (65 s of frames over 25 ms in a 170 s run; 13 s with it on). Synchronous
      * debug output is a debugging state of the context: it changes when the callback is called, not what is drawn; the
-     * callback prints errors only unless WT_GLDEBUG is set, as before. WT_GL_DRIVER_THREAD=1 = the old behaviour. */
-    if (g_debug || !getenv("WT_GL_DRIVER_THREAD")) glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_);
-    g_fdlog = getenv("WT_FDLOG") != NULL;
+     * callback prints errors only unless MR_GLDEBUG is set, as before. MR_GL_DRIVER_THREAD=1 = the old behaviour. */
+    if (g_debug || !getenv("MR_GL_DRIVER_THREAD")) glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS_);
+    g_fdlog = getenv("MR_FDLOG") != NULL;
     if (g_fdlog && glDebugMessageControl) glDebugMessageControl(0x1100 /* DONT_CARE */, 0x1100, 0x1100, 0, NULL, 1);     /* every severity, low ones too */
     glDebugMessageCallback((void *)debug_cb, NULL);
     glGetIntegerv(GL_MAX_PROGRAM_PARAMETER_BUFFER_BINDINGS_NV_, &g_max_pbuf);
@@ -4131,7 +4131,7 @@ static DWORD WINAPI render_thread(LPVOID arg) {
     fflush(stdout);
     shd_init();
     hitch_set_render();
-    nvn_c4_gl_selftest_hook();                  /* WT_NVN_GLTEST: OpenGL self-test of nvn_c4.c, then exit */
+    nvn_c4_gl_selftest_hook();                  /* MR_NVN_GLTEST: OpenGL self-test of nvn_c4.c, then exit */
     SetEvent(g_ready_event);
     render_loop();
     return 0;
@@ -4140,22 +4140,22 @@ static DWORD WINAPI render_thread(LPVOID arg) {
 /* Called by display.c once the window exists. */
 void nvn_gl_start(void *hwnd) {
     g_hwnd = hwnd;
-    {   /* V1: which back end. WT_RENDERER=gl (default) | vk */
-        const char *e = getenv("WT_RENDERER");
-        if (e && e[0] && strcmp(e, "gl") && strcmp(e, "vk")) { printf("nvn: WT_RENDERER=%s is not a renderer (gl, vk)\n", e); fflush(stdout); ExitProcess(5); }
-        /* Track V session 4: VULKAN IS THE DEFAULT. WT_RENDERER=gl|vk wins; else renderer = vulkan | opengl of config\graphics.ini. */
+    {   /* V1: which back end. MR_RENDERER=gl (default) | vk */
+        const char *e = getenv("MR_RENDERER");
+        if (e && e[0] && strcmp(e, "gl") && strcmp(e, "vk")) { printf("nvn: MR_RENDERER=%s is not a renderer (gl, vk)\n", e); fflush(stdout); ExitProcess(5); }
+        /* Track V session 4: VULKAN IS THE DEFAULT. MR_RENDERER=gl|vk wins; else renderer = vulkan | opengl of config\graphics.ini. */
         g_vk = e && e[0] ? !strcmp(e, "vk") : !gfx_options()->renderer;
         g_rb = g_vk ? &rb_vk : &rb_gl;
-        printf("nvn: renderer: %s (%s)\n", g_vk ? "Vulkan (nvn_vk.c)" : "OpenGL (nvn_gl.c)", e && e[0] ? "WT_RENDERER" : "graphics.ini; the default is Vulkan");
+        printf("nvn: renderer: %s (%s)\n", g_vk ? "Vulkan (nvn_vk.c)" : "OpenGL (nvn_gl.c)", e && e[0] ? "MR_RENDERER" : "graphics.ini; the default is Vulkan");
     }
     InitializeCriticalSection(&g_job_lock);
     InitializeCriticalSection(&g_dead_lock);
     g_job_event = CreateEventA(NULL, FALSE, FALSE, NULL);
     g_ready_event = CreateEventA(NULL, TRUE, FALSE, NULL);
-    { const char *e = getenv("WT_STACKS_AT"); void nvn_vk_stacks_at(int seconds); if (e && atoi(e) > 0) nvn_vk_stacks_at(atoi(e)); }      /* session 13, TEST: every thread's call stack once, that many seconds from here, with either renderer (nvn_vk_wd.c) */
+    { const char *e = getenv("MR_STACKS_AT"); void nvn_vk_stacks_at(int seconds); if (e && atoi(e) > 0) nvn_vk_stacks_at(atoi(e)); }      /* session 13, TEST: every thread's call stack once, that many seconds from here, with either renderer (nvn_vk_wd.c) */
     CreateThread(NULL, 16 << 20, render_thread, NULL, 0, NULL);
 #ifdef __APPLE__
-    /* [witchtime] macOS: the render thread has the window's surface made on this thread, the program's first (nvn_vk.c) */
+    /* [moonriver] macOS: the render thread has the window's surface made on this thread, the program's first (nvn_vk.c) */
     { void SDL_PumpEvents(void); while (WaitForSingleObject(g_ready_event, 2) != WAIT_OBJECT_0) SDL_PumpEvents(); }
 #else
     WaitForSingleObject(g_ready_event, INFINITE);
@@ -4174,11 +4174,11 @@ void nvn_gl_report(FILE *out) {
     fprintf(out, "nvn_gl: shader binaries on disk: %lld loaded, %lld compiled and saved by the render thread, %lld refused by the driver (compiled again)\n", (long long)g_shd_loaded, (long long)g_shd_saved, (long long)g_shd_refused);
     for (int i = 0; g_fdlog && i < 64 && g_fd_ids[i].n; i++) fprintf(out, "fdlog-id: %u type %x severity %x: %lld messages, first: %s\n", g_fd_ids[i].id, g_fd_ids[i].type, g_fd_ids[i].sev, (long long)g_fd_ids[i].n, g_fd_ids[i].text);
     { LARGE_INTEGER f; QueryPerformanceFrequency(&f);
-      fprintf(out, "nvn_gl: shader pairs made ready by the workers (WT_PAIR_WARM=%d): %lld from pairs.txt + %lld programs handed over; %lld warm draws, %lld of them over 8 ms (not in the driver's cache), %.1f s in all; %lld known already, %lld without binaries or not translated, %lld stages compiled for it\n",
+      fprintf(out, "nvn_gl: shader pairs made ready by the workers (MR_PAIR_WARM=%d): %lld from pairs.txt + %lld programs handed over; %lld warm draws, %lld of them over 8 ms (not in the driver's cache), %.1f s in all; %lld known already, %lld without binaries or not translated, %lld stages compiled for it\n",
               pw_mode(), (long long)g_pw_named, (long long)g_pw_progs, (long long)g_pw_warmed, (long long)g_pw_cold_n, (double)g_pw_ticks / (double)f.QuadPart, (long long)g_pw_dup, (long long)g_pw_missing, (long long)g_pw_compiled);
       fprintf(out, "nvn_gl: presents held for shader preparation: %lld times, %.2f s in all\n", (long long)g_pw_gates, (double)g_pw_gate_ticks / (double)f.QuadPart); }
     fprintf(out, "nvn_gl: shader pairs drawn (pairs.txt): %lld known at start, %lld added in this run\n", (long long)g_prec_loaded, (long long)g_prec_added);
-    if (pair_mode()) fprintf(out, "nvn_gl: linked pair programs (WT_PAIR=%d): %lld loaded from disk, %lld linked here, %lld not linkable, %lld binaries refused, %lld draws used one\n", pair_mode(), (long long)g_pair_loaded, (long long)g_pair_linked, (long long)g_pair_failed, (long long)g_pair_refused, (long long)g_pair_draws);
+    if (pair_mode()) fprintf(out, "nvn_gl: linked pair programs (MR_PAIR=%d): %lld loaded from disk, %lld linked here, %lld not linkable, %lld binaries refused, %lld draws used one\n", pair_mode(), (long long)g_pair_loaded, (long long)g_pair_linked, (long long)g_pair_failed, (long long)g_pair_refused, (long long)g_pair_draws);
     { LARGE_INTEGER f; QueryPerformanceFrequency(&f); fprintf(out, "nvn_gl: first draws of a program pair preceded by a discarded point: %lld (%lld over 4 ms, %.0f ms in all), not done %lld (counter running or vertex stage with side effects)\n", (long long)g_fdw_n, (long long)g_fdw_slow, (double)g_fdw_ticks * 1000.0 / (double)f.QuadPart, (long long)g_fdw_skipped); }
     { LARGE_INTEGER f; QueryPerformanceFrequency(&f); fprintf(out, "nvn_gl: nvnProgramSetShaders held its caller %lld times, %.1f s in all, while all workers were compiling\n", (long long)g_shw_held, (double)g_shw_held_ticks / (double)f.QuadPart); }
     fprintf(out, "nvn_gl: shader variants (variants.txt): %lld known at start, %lld of them queued for the workers, %lld added in this run\n", (long long)g_shv_loaded, (long long)g_shv_queued, (long long)g_shv_added);
@@ -4238,10 +4238,10 @@ static void prog_finalize(Ctx *c) {
     nvn_label_drop(A0);
     defer_free(K_PROG, p);
 }
-/* Debug aid WT_SHADERDUMP_ALL=<dir>: every shader stage handed to nvnProgramSetShaders, whole, as <dir>/s<program>_<i>.mxd for the
+/* Debug aid MR_SHADERDUMP_ALL=<dir>: every shader stage handed to nvnProgramSetShaders, whole, as <dir>/s<program>_<i>.mxd for the
  * offline harness (mxtest.exe). File: "MXD1", u32 program serial, u32 index in the call, u32 control bytes, u32 data bytes, then the
  * control section (at least up to +0x720, plus the assembly text if any) and the code section (header + code + constants). */
-/* [witchtime] A compute stage's machine code starts at data + control +0x708: 0 for bare code, 0x100 behind B3's 0x12345679
+/* [moonriver] A compute stage's machine code starts at data + control +0x708: 0 for bare code, 0x100 behind B3's 0x12345679
  * header (graphics stages: 0x30, behind 0x12345678 and the program header). The constants' offset (control +0x700) is from
  * the data's start; it is kept relative to the code, which is what the compute paths add it to. */
 static void compute_code(Stage *st, uint64_t control, uint64_t data) {
@@ -4254,7 +4254,7 @@ static void compute_code(Stage *st, uint64_t control, uint64_t data) {
 static void dump_stage_all(int serial, int index, uint64_t control, uint64_t data) {
     static const char *dir;
     static volatile LONG init;
-    if (!init) { dir = getenv("WT_SHADERDUMP_ALL"); InterlockedExchange(&init, 1); }
+    if (!init) { dir = getenv("MR_SHADERDUMP_ALL"); InterlockedExchange(&init, 1); }
     if (!dir || !control) return;
     uint32_t text_off = rd32(control + 0x14), text_len = rd32(control + 0x18), ctl_len = 0x720, data_len = 0;
     if (text_len && text_len < (1u << 20) && text_off < (1u << 20) && text_off + text_len > ctl_len) ctl_len = text_off + text_len;
@@ -4305,7 +4305,7 @@ static int pw_queue_prog(Prog *p) {
     LeaveCriticalSection(&g_shw_lock);
     if (seen) free(j); else { InterlockedIncrement64(&g_pw_progs); pw_enqueue(j); }
     static int nowait = -1;
-    if (nowait < 0) nowait = getenv("WT_SHADER_NOWAIT") != NULL;
+    if (nowait < 0) nowait = getenv("MR_SHADER_NOWAIT") != NULL;
     if (!nowait && g_st.frames >= 300 && g_shw_queued != g_shw_done) {
         LONG64 t0 = pf_now(), freq = 0;
         { LARGE_INTEGER q; QueryPerformanceFrequency(&q); freq = q.QuadPart; }
@@ -4322,9 +4322,9 @@ void nvn_front_pool_made(uint64_t memory, uint64_t size) { if (g_rb == &rb_vk &&
  * control: magic 0x98761234, offset of the NV_gpu_program5 text at +0x14, its length at +0x18. */
 _Thread_local long long nvn_setsh_part[8];
 static void prog_set_shaders_(Ctx *c);
-static void prog_set_shaders(Ctx *c) {             /* session 8: the call timed part by part; a line for every call over 2 ms (WT_VK_SETSH_LOG=<ms> changes the limit, 0 = no lines) */
+static void prog_set_shaders(Ctx *c) {             /* session 8: the call timed part by part; a line for every call over 2 ms (MR_VK_SETSH_LOG=<ms> changes the limit, 0 = no lines) */
     static int lim = -1; static LONG nl; static LONG64 fq;
-    if (lim < 0) { LARGE_INTEGER f; QueryPerformanceFrequency(&f); fq = f.QuadPart; lim = getenv("WT_VK_SETSH_LOG") ? atoi(getenv("WT_VK_SETSH_LOG")) : 2; }
+    if (lim < 0) { LARGE_INTEGER f; QueryPerformanceFrequency(&f); fq = f.QuadPart; lim = getenv("MR_VK_SETSH_LOG") ? atoi(getenv("MR_VK_SETSH_LOG")) : 2; }
     if (!lim || g_rb != &rb_vk) { prog_set_shaders_(c); return; }
     memset(nvn_setsh_part, 0, sizeof nvn_setsh_part);
     uint64_t guest = A0, ra = c->x[30];
@@ -4353,8 +4353,8 @@ static void prog_set_shaders_(Ctx *c) {
         if (!control || rd32(control) != 0x98761234u) { logf_limited(&nlog, 10, "nvn_gl: %s: shader %d of program #%d has no recognisable control section\n", hostfn_current_name(), i, p->serial); continue; }
         uint64_t data = rd64(A2 + (uint64_t)i * stride);
         dump_stage_all(p->serial, i, control, data);
-        {   static int diag = -1; static LONG nd;      /* WT_SHADER_SRC_LOG=<n>: where the first n heap-held stages come from (guest return addresses, the memory around the control section) */
-            if (diag < 0) diag = getenv("WT_SHADER_SRC_LOG") ? atoi(getenv("WT_SHADER_SRC_LOG")) : 0;
+        {   static int diag = -1; static LONG nd;      /* MR_SHADER_SRC_LOG=<n>: where the first n heap-held stages come from (guest return addresses, the memory around the control section) */
+            if (diag < 0) diag = getenv("MR_SHADER_SRC_LOG") ? atoi(getenv("MR_SHADER_SRC_LOG")) : 0;
             if (diag && (control >> 28) != 0x710 && InterlockedIncrement(&nd) <= diag) {
                 uint64_t fp = c->x[29], ra1 = fp ? rd64(fp + 8) : 0, fp2 = fp ? rd64(fp) : 0, ra2 = fp2 ? rd64(fp2 + 8) : 0, fp3 = fp2 ? rd64(fp2) : 0, ra3 = fp3 ? rd64(fp3 + 8) : 0, pg = control & ~0xffffull;
                 printf("shader-src: frame %lld program #%d stage %d of %d: control %llx data %llx (third pointer %llx) | called from %llx <- %llx <- %llx <- %llx | 64K base: %08x %08x %08x %08x %08x %08x %08x %08x | before control: %016llx %016llx %016llx %016llx | data: %08x %08x %08x %08x\n", nvn_front_frame_next(), p->serial, i, count,
@@ -4373,7 +4373,7 @@ static void prog_set_shaders_(Ctx *c) {
                 if (s2 >= 0 && s2 < 2 && p->st[s2].state == 1 && len2 > 0 && len2 < (4 << 20)) { p->st[s2].code = P(data + 0x30); p->st[s2].code_len = len2; p->st[s2].glsl_state = 0; memcpy(p->st[s2].ctl, P(control + 0x6f0), 32); }
             }
             /* V1 M3: a compute program with assembly text (the five built into the exe) also carries its machine code; the
-             * Vulkan back end runs that (no NV assembly there), OpenGL only with WT_COMPUTE_MC=1 (translator check). */
+             * Vulkan back end runs that (no NV assembly there), OpenGL only with MR_COMPUTE_MC=1 (translator check). */
             if (rd32(control + 0x714) == 5 && data && p->st[5].state == 1) {
                 static int ncl;
                 int len = (int)rd32(control + 0x6f8);
@@ -4403,7 +4403,7 @@ static void prog_set_shaders_(Ctx *c) {
         int s = stage_of_type[(rd32(data + 0x30) >> 10) & 15], len = (int)rd32(control + 0x6f8);
         if (s < 0 || len <= 0 || len > (4 << 20)) { logf_limited(&nlog2, 10, "nvn_gl: program #%d shader %d: unexpected program header %08x, code size %d\n", p->serial, i, rd32(data + 0x30), len); continue; }
         p->st[s].code = P(data + 0x30); p->st[s].code_len = len; p->st[s].state = 4; p->st[s].dumped = 0; p->st[s].glsl_state = 0; memcpy(p->st[s].ctl, P(control + 0x6f0), 32);
-        if (s == 4) memcpy(p->st[4].tess, P(control + 0x738), 16);      /* [witchtime] GLSLC tessellation info: primitive mode, spacing, point mode, vertex order (mx_translate.h) */
+        if (s == 4) memcpy(p->st[4].tess, P(control + 0x738), 16);      /* [moonriver] GLSLC tessellation info: primitive mode, spacing, point mode, vertex order (mx_translate.h) */
     }
     if (g_rb == &rb_vk) { LONG64 tb = pf_now(); nvn_vk_program_set(p); nvn_setsh_part[4] += pf_now() - tb; RET(1); return; }       /* V1 M4: the stages go to the Vulkan workers at once (nvn_vk_m4.c) */
     if (!pw_queue_prog(p))
@@ -4671,7 +4671,7 @@ static void cmd_add_control_memory(Ctx *c) { CmdBuf *cb = cb_get(A0); cb->ctrl_s
 static void cmd_get_command_size(Ctx *c) { RET(cb_get(A0)->cmd_size); }
 static void cmd_get_control_size(Ctx *c) { RET(cb_get(A0)->ctrl_size); }
 static void cmd_is_recording(Ctx *c) { RET(cb_get(A0)->recording); }
-/* L1 round 2, TEST ONLY (WT_L1_TRACE=1 with WT_L1=1): for the 5 presents after the first press, every command-buffer
+/* L1 round 2, TEST ONLY (MR_L1_TRACE=1 with MR_L1=1): for the 5 presents after the first press, every command-buffer
  * recording, submission, fence, sync wait, window acquire and present, with the guest thread name and the guest return address. */
 int display_l1_trace(void); double display_l1_ms(void); const char *guest_thread_name_of(DWORD tid);
 #define L1T(...) do { if (display_l1_trace()) { char l1b_[240]; snprintf(l1b_, sizeof l1b_, __VA_ARGS__); printf("l1-trace: %+8.2f %-26s lr %09llx %s%c", display_l1_ms(), guest_thread_name_of(GetCurrentThreadId()) ? guest_thread_name_of(GetCurrentThreadId()) : "?", (unsigned long long)c->x[30], l1b_, 10); } } while (0)
@@ -4826,7 +4826,7 @@ static void cmd_images(Ctx *c) {                        /* (cmdbuf, stage, first
     if (src) memcpy(BLOB(m), P(src), (size_t)n * 8); else memset(BLOB(m), 0, (size_t)n * 8);
 }
 
-/* Round 18, TEST ONLY (WT_RACECHK=1): does guest memory that submitted commands NAME (uniform / storage / vertex
+/* Round 18, TEST ONLY (MR_RACECHK=1): does guest memory that submitted commands NAME (uniform / storage / vertex
  * ranges) change between nvnQueueSubmitCommands on the game's thread and the replay on the render thread? The submit
  * walks the lists and keeps a hash of every range (and the first 512 bytes of a uniform range); the back end calls
  * nvn_front_racechk at the start (phase 1) and at the end (phase 2) of the replay of the same batch, which walks them
@@ -4836,7 +4836,7 @@ static int race_is_storage(const RaceRec *r, const Range *g) { for (int i = 0; i
 static RaceRec *g_race_head, *g_race_tail;
 static SRWLOCK g_race_lock = SRWLOCK_INIT;
 static LONG64 g_race_stat[3][3], g_race_batches, g_race_bad_batches[3];      /* [uniform, storage, vertex][ranges seen, changed before the replay, changed during it] */
-static int racechk_env(void) { static int on = -1; if (on < 0) on = getenv("WT_RACECHK") != NULL; return on; }
+static int racechk_env(void) { static int on = -1; if (on < 0) on = getenv("MR_RACECHK") != NULL; return on; }
 static uint64_t race_fnv(const uint8_t *b, size_t n) { uint64_t h = 0xcbf29ce484222325ULL; for (size_t i = 0; i < n; i++) h = (h ^ b[i]) * 0x100000001B3ULL; return h; }
 static void race_walk(uint64_t handle, int depth, RaceRec *r, int phase, int *pos, int *bad) {
     size_t len = 0;
@@ -4944,10 +4944,10 @@ static void queue_submit(Ctx *c) {                      /* (queue, count, handle
         }
         ReleaseSRWLockShared(&g_list_lock);
     }
-    if (j.count > 0 && A2 && drawtag_env()) {      /* round 17, TEST (WT_DRAWTAG): the frame WT_SHOT_FIGHT will save: its commands are tagged */
+    if (j.count > 0 && A2 && drawtag_env()) {      /* round 17, TEST (MR_DRAWTAG): the frame MR_SHOT_FIGHT will save: its commands are tagged */
         /* the game polls the pad for frame n AFTER it has submitted the commands whose picture is saved as fight_<n>
          * (submit, next frame's logic and poll, present): the tag is armed by the present that saved fight_<n-1>, so
-         * WT_SHOT_FIGHT must name n-1 as well (e.g. 699,700 tags the commands of 700). First form (the pending
+         * MR_SHOT_FIGHT must name n-1 as well (e.g. 699,700 tags the commands of 700). First form (the pending
          * shot at the submit) tagged nothing: run p17_zvk. */
         extern volatile LONG g_drawtag_next;
         int n = (int)InterlockedExchange(&g_drawtag_next, 0);
@@ -4962,7 +4962,7 @@ static void queue_submit(Ctx *c) {                      /* (queue, count, handle
             gl_post(g_rb->submit_async, copy, size);
             free(copy);
         } else gl_run(g_rb->submit, &j);
-        l1_pipe_after_submit();      /* L1 round 2 (WT_L1_PIPE=1): the picture is complete after this submission: present it now, hold the game here */
+        l1_pipe_after_submit();      /* L1 round 2 (MR_L1_PIPE=1): the picture is complete after this submission: present it now, hold the game here */
     }
 }
 static void wb_set_textures(Ctx *c) {                   /* (builder, count, textures[]): kept in the builder (0x40 bytes) */
@@ -4999,23 +4999,23 @@ static void win_acquire(Ctx *c) {                       /* (window, sync, int *t
 }
 static void queue_acquire(Ctx *c) { c->x[0] = c->x[1]; c->x[1] = 0; win_acquire(c); }      /* nvnQueueAcquireTexture(queue, window, int *textureIndex) */
 static void win_set_crop(Ctx *c) { Window *w = hobj(A0, K_WIN); if (w) { w->crop[0] = (int)A1; w->crop[1] = (int)A2; w->crop[2] = (int)A3; w->crop[3] = (int)A4; } }
-/* Session 13, TEST ONLY: WT_SHOT_FIGHT=<n>[,<n>...] (nnhid.c counts the fight frames at the pad poll): the present the game
- * queues next after the poll that reached fight frame n is saved as fight_<n>.bmp in WT_SHOT_DIR by whichever back end runs. */
+/* Session 13, TEST ONLY: MR_SHOT_FIGHT=<n>[,<n>...] (nnhid.c counts the fight frames at the pad poll): the present the game
+ * queues next after the poll that reached fight frame n is saved as fight_<n>.bmp in MR_SHOT_DIR by whichever back end runs. */
 static volatile LONG g_fight_shot;
 void nvn_front_shot_fight(int n) { InterlockedExchange(&g_fight_shot, n); }
-int nvn_front_shot_pending(void) { return (int)g_fight_shot; }      /* round 17 (WT_DRAWTAG): the fight frame the next queued present will be saved as, 0 = none */
+int nvn_front_shot_pending(void) { return (int)g_fight_shot; }      /* round 17 (MR_DRAWTAG): the fight frame the next queued present will be saved as, 0 = none */
 unsigned long nvn_front_present_tid(void) { return g_pf_main_tid; }      /* the game thread that queues the presents (the stall log of nvn_vk_wd.c) */
 /* Session 14 (display.c, the vsync thread at a tick): the present the Vulkan back end kept for this tick, as a job of the
  * render thread (in order with the other jobs; nobody waits for it). */
 void nvn_vk_present_flush_job(void *arg);              /* nvn_vk_draw.c */
 void nvn_front_post_present_flush(void) { if (g_vk) gl_post(nvn_vk_present_flush_job, NULL, 0); }
-/* [witchtime] the PC settings menu (pcmenu.c, its own thread): its picture once more, as a job of the render thread */
+/* [moonriver] the PC settings menu (pcmenu.c, its own thread): its picture once more, as a job of the render thread */
 void nvn_vk_pcmenu_job(void *arg);                    /* nvn_vk_pcmenu.c */
 int nvn_front_post_pcmenu(void) { if (g_vk) gl_post(nvn_vk_pcmenu_job, NULL, 0); return g_vk; }
 /* ---- Track L1 (input latency), early present. The game submits the commands of a frame's picture BEFORE it waits for the
  * window texture (nvnSyncWait on the acquire sync = display_wait_refresh), then reads the pad, runs that frame's logic and
  * only then calls nvnQueuePresentTexture for the picture it had finished before the wait (measured: tests\logs\vk13_l1t_*,
- * `l1-submit:` 0 submits between the wait and the present in every fight frame). With WT_L1_EARLY=1 (graphics.ini
+ * `l1-submit:` 0 submits between the wait and the present in every fight frame). With MR_L1_EARLY=1 (graphics.ini
  * latency = early | lowest) that picture is handed to the window when the wait BEGINS, for the tick the game waits for (the
  * hold of session 14 keeps it until then), instead of one tick later; the game's own present of the same texture then only
  * does the pacing bookkeeping. If the game does not present that texture next, the early present is counted as a miss. */
@@ -5037,7 +5037,7 @@ static void l1_early_present(void) {
     g_l1_early_n++;
     gl_post(g_rb->present, &j, sizeof j);
 }
-/* L1 round 2, PIPE (WT_L1_PIPE=1): measured (WT_L1_TRACE, tests\logs\vk13_l1t_tr1.log): after its present the game
+/* L1 round 2, PIPE (MR_L1_PIPE=1): measured (MR_L1_TRACE, tests\logs\vk13_l1t_tr1.log): after its present the game
  * acquires the next window texture, waits for it (nvnSyncWait on the acquire sync) and for the previous frame's fence,
  * then ends the command buffers its "render dispatch" thread recorded during the previous frame plus one of its own and
  * submits them in ONE call, then runs the next frame (task workers, pad poll, logic) and only then presents that picture. The picture is complete after that submission
@@ -5047,7 +5047,7 @@ static void l1_early_present(void) {
  * Saves one whole frame of the game's two. */
 static int g_l1_pipe = -1;
 static volatile LONG g_l1_pipe_pending;
-static int l1_pipe_on(void) { if (g_l1_pipe < 0) { const char *e = getenv("WT_L1_PIPE"); int display_l1_pipe_default(void); g_l1_pipe = e ? atoi(e) != 0 : display_l1_pipe_default(); printf("nvn: pipe (picture presented right after the game's frame submission, game held there) %s%c", g_l1_pipe ? "ON" : "off", 10); } return g_l1_pipe && g_vk; }
+static int l1_pipe_on(void) { if (g_l1_pipe < 0) { const char *e = getenv("MR_L1_PIPE"); int display_l1_pipe_default(void); g_l1_pipe = e ? atoi(e) != 0 : display_l1_pipe_default(); printf("nvn: pipe (picture presented right after the game's frame submission, game held there) %s%c", g_l1_pipe ? "ON" : "off", 10); } return g_l1_pipe && g_vk; }
 static volatile LONG g_l1_sh_pending;
 static int l1_pipe_wait(void) {
     InterlockedExchange(&g_l1_sh_pending, 1);
@@ -5057,7 +5057,7 @@ static int l1_pipe_wait(void) {
 }
 static void l1_nop_job(void *arg) { (void)arg; }
 static void l1_pipe_after_submit(void) {
-    { static int sh = -1; if (sh < 0) sh = getenv("WT_L1_SUBMIT_HOLD") && atoi(getenv("WT_L1_SUBMIT_HOLD")); if (sh && !g_l1_pipe && InterlockedExchange(&g_l1_sh_pending, 0)) gl_run(l1_nop_job, NULL); }      /* TEST: old path, but the game waits until the render thread has replayed this submission (is the old picture a race with the game's next frame?) */
+    { static int sh = -1; if (sh < 0) sh = getenv("MR_L1_SUBMIT_HOLD") && atoi(getenv("MR_L1_SUBMIT_HOLD")); if (sh && !g_l1_pipe && InterlockedExchange(&g_l1_sh_pending, 0)) gl_run(l1_nop_job, NULL); }      /* TEST: old path, but the game waits until the render thread has replayed this submission (is the old picture a race with the game's next frame?) */
     if (!InterlockedExchange(&g_l1_pipe_pending, 0)) return;
     Window *w = g_l1_acq_win;
     if (!w) { display_wait_refresh(); return; }
@@ -5076,7 +5076,7 @@ static void queue_present(Ctx *c) {                     /* (queue, window, textu
     g_pf_main_tid = GetCurrentThreadId();
     if (g_l1_early_win && g_l1_early_win == j.win && g_l1_early_idx == j.index) {      /* L1: this picture was presented at the game's wait already: only the pacing bookkeeping */
         g_l1_early_win = NULL;
-        if (g_l1_pipe) {      /* round 2: planned and held at the submission already; a picture wanted by WT_SHOT_FIGHT is saved by presenting the same texture again (test only) */
+        if (g_l1_pipe) {      /* round 2: planned and held at the submission already; a picture wanted by MR_SHOT_FIGHT is saved by presenting the same texture again (test only) */
             if (g_fight_shot) { void nvn_vk_shot_job(void *arg); j.shot_fight = (int)InterlockedExchange(&g_fight_shot, 0); gl_run(nvn_vk_shot_job, &j); }
         } else {
         display_before_present();
@@ -5087,8 +5087,8 @@ static void queue_present(Ctx *c) {                     /* (queue, window, textu
         return;
     }
     if (g_l1_early_win) { g_l1_early_win = NULL; g_l1_early_miss++; }
-    if (g_fight_shot) j.shot_fight = (int)InterlockedExchange(&g_fight_shot, 0);      /* session 13 (test, WT_SHOT_FIGHT): bound here, on the game's thread, so that both renderers save the same game frame */
-    if (j.shot_fight && drawtag_env()) InterlockedExchange(&g_drawtag_next, j.shot_fight + 1);      /* round 17 (WT_DRAWTAG): the next submission is the next fight frame's */
+    if (g_fight_shot) j.shot_fight = (int)InterlockedExchange(&g_fight_shot, 0);      /* session 13 (test, MR_SHOT_FIGHT): bound here, on the game's thread, so that both renderers save the same game frame */
+    if (j.shot_fight && drawtag_env()) InterlockedExchange(&g_drawtag_next, j.shot_fight + 1);      /* round 17 (MR_DRAWTAG): the next submission is the next fight frame's */
     display_before_present();
     { void display_present_plan(int vulkan); display_present_plan(g_vk); }      /* session 14: the tick this frame is shown at, decided before the present (display.c) */
     gl_run(g_rb->present, &j);
@@ -5189,7 +5189,7 @@ static void queue_fence_sync(Ctx *c) {                  /* (queue, sync, conditi
  * posted before it. B2's main thread begins each frame with a SyncWait on the window texture's acquire sync (never fenced:
  * its job answers 3 at once), right after it has posted the last frame's submission, present and fence: in a heavy fight
  * frame at 120 fps it stood there 4-5 ms, the whole replay of that submission, before it could run the next frame's logic
- * (3-4 ms): the game and the replay took turns (9-10 ms frames). Now answered on the game's thread (Vulkan; WT_FASTSYNC=0:
+ * (3-4 ms): the game and the replay took turns (9-10 ms frames). Now answered on the game's thread (Vulkan; MR_FASTSYNC=0:
  * every wait is a job as before):
  *   - SyncWait on the window texture's sync that no fence ever named (posted 0): 3 at once, the job's answer; the pipe /
  *     refresh handling below as before;
@@ -5204,7 +5204,7 @@ static void queue_fence_sync(Ctx *c) {                  /* (queue, sync, conditi
  * Counted in the "nvn_jobwait:" line (answered at once, waited for here, and why the others took a job). */
 static int g_fastsync = -1;
 static volatile LONG64 g_fs[12];     /* answered without a job: 0 SyncWait window, 1 SyncWait done, 2 QueueWaitSync never fenced, 3 QueueWaitSync done; jobs: 4 SyncWait on a fence not run yet, 5 run, not finished, 6 never fenced (not the window) / unsafe / finalized, 7 QueueWaitSync; 8 SyncWait waited for on the game's thread (sync_wait_here), 9 its ticks; 10 job: run, not finished, a timeout under 1 s; 11 a poll (timeout 0) of such a fence answered here (sync_poll_here) */
-static int fastsync_on(void) { if (g_fastsync < 0) g_fastsync = !strcmp(g_rb->name, "vk") && !(getenv("WT_FASTSYNC") && !atoi(getenv("WT_FASTSYNC"))); return g_fastsync; }
+static int fastsync_on(void) { if (g_fastsync < 0) g_fastsync = !strcmp(g_rb->name, "vk") && !(getenv("MR_FASTSYNC") && !atoi(getenv("MR_FASTSYNC"))); return g_fastsync; }
 int nvn_vk_sync_done(const SyncObj *o);                 /* nvn_vk_draw.c */
 static int sync_fast_done(const SyncObj *o) { return !o->dead && !o->unsafe && o->posted && o->posted == o->ran && nvn_vk_sync_done(o); }      /* ran is read before s (nvn_vk_draw.c sync_ran) */
 /* A fence not finished yet. B2 waits on the fence it issued two frames before, and after a long frame its frame limiter
@@ -5249,10 +5249,10 @@ static int sync_wait_here(SyncObj *o, uint64_t timeout_ns) {
  * 1660 Ti behind in a cutscene: 398 jobs a frame). The fence has run and R.done says its submission has not finished:
  * the caller waits here for R.done to move (the render thread keeps it current during a replay and wakes the waiters,
  * nvn_front_done_moved), 1 ms at most, and gets 0, signalled, or 2, timeout expired. Only while the render thread is busy:
- * idle, nobody moves R.done, and the job asks the driver at once. -1: the job. WT_SYNC_POLL=0: always the job, as before. */
+ * idle, nobody moves R.done, and the job asks the driver at once. -1: the job. MR_SYNC_POLL=0: always the job, as before. */
 static int sync_poll_here(const SyncObj *o) {
     static int on = -1;
-    if (on < 0) on = !(getenv("WT_SYNC_POLL") && !atoi(getenv("WT_SYNC_POLL")));
+    if (on < 0) on = !(getenv("MR_SYNC_POLL") && !atoi(getenv("MR_SYNC_POLL")));
     if (!on || o->dead || o->unsafe || !o->posted || o->posted != o->ran) return -1;
     if (!*(Job *volatile *)&g_job_head && !g_rt_cur) return -1;
     InterlockedIncrement(&g_dw_waiters);
@@ -5286,7 +5286,7 @@ static void sync_wait(Ctx *c) {                         /* (sync, timeoutNs) -> 
     }
     if (o && o == g_window_sync && A1 && j.result == 3) {      /* P3 round 3: the window texture's sync (never fenced by us): it is free at the refresh that shows the queued frame (display.c) */
         if (l1_pipe_wait()) j.result = 1; else {      /* L1 round 2: pipe mode does not hold here */
-        l1_early_present();                                    /* L1 (latency = early / WT_L1_EARLY=1): the picture the game finished before this wait goes to the window now (at its tick) */
+        l1_early_present();                                    /* L1 (latency = early / MR_L1_EARLY=1): the picture the game finished before this wait goes to the window now (at its tick) */
         if (display_wait_refresh()) j.result = 1;             /* NVN_SYNC_WAIT_RESULT_CONDITION_SATISFIED; otherwise as before */
         }
     }
@@ -5749,8 +5749,8 @@ static void dev_finalize_command_handle(Ctx *c) {       /* (device, handle): the
 }
 /* ================================================================ V1 step S0: the render thread's jobs in Vulkan mode
  * (plan\phases\V1_vulkan.md, section 1). Every job the entry points above hand to the render thread arrives here when
- * WT_RENDERER=vk. A job nvn_vk.c implements is done there; one it does not implement yet stops the game with the name
- * of the NVN operation (nvn_vk_missing; WT_VK_MISSING=warn: reported once, counted, skipped). A job that is not one
+ * MR_RENDERER=vk. A job nvn_vk.c implements is done there; one it does not implement yet stops the game with the name
+ * of the NVN operation (nvn_vk_missing; MR_VK_MISSING=warn: reported once, counted, skipped). A job that is not one
  * of this file's (nvn_vk.c's own, through nvn_render_run) runs as it is. Step S2 replaces this table by the RBackend
  * interface. */
 void nvn_render_run(void (*fn)(void *), void *arg) { gl_run(fn, arg); }
@@ -5763,11 +5763,11 @@ const RBackend rb_gl = {"gl", job_submit, job_submit_async, job_present, job_fen
  * the statics above; nothing here calls OpenGL. Render thread only, except where the callee has its own lock. */
 int nvn_front_fmt(int nvn_format, Fmt *f) { return fmt_get(nvn_format, f); }
 uint8_t *nvn_front_list(uint64_t handle, size_t *len) { return list_lookup(handle, len); }
-/* Track V session 4, step-aligned comparison of the two renderers: with WT_SHOT_STEPS=1 the scripted input (nnhid.c)
- * asks for a screenshot when a key step of WT_SEQ begins; the next presented frame is saved as step_<n>.bmp in
- * WT_SHOT_DIR by whichever back end runs. Counted in input polls, so both renderers save the same game frame. */
+/* Track V session 4, step-aligned comparison of the two renderers: with MR_SHOT_STEPS=1 the scripted input (nnhid.c)
+ * asks for a screenshot when a key step of MR_SEQ begins; the next presented frame is saved as step_<n>.bmp in
+ * MR_SHOT_DIR by whichever back end runs. Counted in input polls, so both renderers save the same game frame. */
 static volatile LONG g_step_shot;
-void nvn_front_shot_step(int step) { static int on = -1; if (on < 0) on = getenv("WT_SHOT_STEPS") != NULL; if (on) InterlockedExchange(&g_step_shot, step + 1); }
+void nvn_front_shot_step(int step) { static int on = -1; if (on < 0) on = getenv("MR_SHOT_STEPS") != NULL; if (on) InterlockedExchange(&g_step_shot, step + 1); }
 int nvn_front_take_step_shot(void) { return g_step_shot ? (int)InterlockedExchange(&g_step_shot, 0) : 0; }
 void nvn_front_batch_begin(void) { g_serial++; }
 void nvn_front_barrier_texmem(void) { g_serial++; }
@@ -5779,7 +5779,7 @@ int nvn_front_tex_levels(const Tex *t) {
     while ((maxdim >> maxl) > 0) maxl++;
     return b->samples > 1 ? 1 : levels > maxl ? maxl : levels;
 }
-/* [Recomps#1] finding 145, TEST ONLY: WT_VK_TEXLOG=<first>,<last>[,<file>]: every texture check that asks write-watch in
+/* [Recomps#1] finding 145, TEST ONLY: MR_VK_TEXLOG=<first>,<last>[,<file>]: every texture check that asks write-watch in
  * those frames (frame, batch serial, gen, address, bytes, result: 0 unchanged, 1 written with the same hash, 2 changed;
  * +4 memory not write-watched), written to <file> (texlog.txt) after the last frame */
 static void texlog(const uint8_t *src, size_t n, uint32_t gen, int res) {
@@ -5788,7 +5788,7 @@ static void texlog(const uint8_t *src, size_t n, uint32_t gen, int res) {
     static struct { long long f; uint32_t s, g; uint64_t addr, n; int res; } *rec;
     static int nrec, done;
     if (a == -2) {
-        const char *e = getenv("WT_VK_TEXLOG"), *c;
+        const char *e = getenv("MR_VK_TEXLOG"), *c;
         a = -1;
         if (e) { a = atoll(e); c = strchr(e, ','); b = c ? atoll(c + 1) : a; c = c ? strchr(c + 1, ',') : NULL; snprintf(path, sizeof path, "%s", c ? c + 1 : "texlog.txt"); rec = malloc(sizeof *rec * 200000); }
     }
@@ -5830,15 +5830,15 @@ int nvn_front_tex_changed(Tex *t, uint32_t gen) {
     g_st.tex_uploads++;
     return 1;
 }
-/* #54: the BC7 pack (tex_pack.c): bc7_textures in graphics.ini, on by default (WT_BC7_TEXTURES=0 or 1 wins), when
- * `wtbuild textures` has made one. */
+/* #54: the BC7 pack (tex_pack.c): bc7_textures in graphics.ini, on by default (MR_BC7_TEXTURES=0 or 1 wins), when
+ * `mrbuild textures` has made one. */
 static int pack_on(void) {
     static volatile LONG on = -1;
     if (on < 0) {
         static SRWLOCK lock;
         AcquireSRWLockExclusive(&lock);
         if (on < 0) {
-            int want = getenv("WT_BC7_TEXTURES") ? atoi(getenv("WT_BC7_TEXTURES")) != 0 : gfx_options()->bc7_textures, n = want ? tex_pack_open("../cache/bc7") : 0;
+            int want = getenv("MR_BC7_TEXTURES") ? atoi(getenv("MR_BC7_TEXTURES")) != 0 : gfx_options()->bc7_textures, n = want ? tex_pack_open("../cache/bc7") : 0;
             if (want) printf(n ? "nvn_vk_tex: bc7_textures: %d converted textures in ../cache/bc7\n" : "nvn_vk_tex: bc7_textures is on, but there is no pack in ../cache/bc7 (%d): textures are decoded as without it\n", n);
             on = n > 0;
         }
@@ -5859,10 +5859,10 @@ static const TexPackEntry *pack_find(const Tex *t, const uint8_t *src) {
  * 30 frames before. A job copies the texture's bytes first and keeps the copy: nvn_front_tex_read uses the result only if the
  * memory still equals it, so what the game writes later is never missed. Whichever of worker and render thread lets go of a
  * job second frees it (owner). With the BC7 pack a job finds the texture there instead (bc7 = 1: out holds BC7 blocks).
- * WT_TEXPREP_THREADS=<n> (default: half of the CPU's threads, 3 to 8; 0 = at the draw, as before). [lm3] It was 3 everywhere:
+ * MR_TEXPREP_THREADS=<n> (default: half of the CPU's threads, 3 to 8; 0 = at the draw, as before). [lm3] It was 3 everywhere:
  * loading a save on 16 threads left 51 textures to be decoded at their draw (699 made or read at their use in play frames,
- * a 182 ms frame), with 8: none (38, 59 ms). WT_TEXPREP_CHECK=1 (test) decodes again at the draw and
- * compares; WT_TEXPACK_CHECK=1 (test) compares the pack's texels with the decode and prints the worst level. */
+ * a 182 ms frame), with 8: none (38, 59 ms). MR_TEXPREP_CHECK=1 (test) decodes again at the draw and
+ * compares; MR_TEXPACK_CHECK=1 (test) compares the pack's texels with the decode and prints the worst level. */
 typedef struct TexPrep { struct TexPrep *next; Tex *t; const uint8_t *src; size_t size, bytes; uint8_t *snap, *out; volatile LONG owner; int ok, bc7; } TexPrep;
 static TexPrep *g_tp_head, *g_tp_tail;
 static CRITICAL_SECTION g_tp_lock;
@@ -5936,11 +5936,11 @@ int nvn_front_tex_prep(Tex *t, size_t *bytes) {
         return 1;
     }
     if (g_tp_n < 0) {
-        const char *e = getenv("WT_TEXPREP_THREADS");
+        const char *e = getenv("MR_TEXPREP_THREADS");
         SYSTEM_INFO si; GetSystemInfo(&si);
         int half = (int)si.dwNumberOfProcessors / 2;
         g_tp_n = e ? atoi(e) : half < 3 ? 3 : half > 8 ? 8 : half;
-        if (getenv("WT_ASTC_DUMP") || getenv("WT_ASTC_LOG") || getenv("WT_TEX_RAWDUMP") || g_tp_n < 0) g_tp_n = 0;
+        if (getenv("MR_ASTC_DUMP") || getenv("MR_ASTC_LOG") || getenv("MR_TEX_RAWDUMP") || g_tp_n < 0) g_tp_n = 0;
         if (g_tp_n) { InitializeCriticalSection(&g_tp_lock); g_tp_go = CreateEventA(NULL, FALSE, FALSE, NULL); }
         for (int k = 0; k < g_tp_n; k++) { HANDLE h = CreateThread(NULL, 0, tp_worker, NULL, 0, NULL); SetThreadPriority(h, THREAD_PRIORITY_BELOW_NORMAL); CloseHandle(h); }
     }
@@ -5987,10 +5987,10 @@ static TexPrep *tp_take(Tex *t, const uint8_t *src) {
 }
 void nvn_front_tex_prep_report(void) {
     if (pack_on()) printf("nvn_vk_tex: bc7_textures: %lld textures from the pack, %lld not in it, %lld read again after the game changed them\n", (long long)g_pack_hit, (long long)g_pack_miss, (long long)g_pack_redo);
-    if (getenv("WT_TEXPACK_CHECK")) printf("nvn_vk_tex: TEST: pack against decode: worst level %.1f dB, %lld levels under 30 dB\n", g_pack_worst, (long long)g_pack_lowq);
+    if (getenv("MR_TEXPACK_CHECK")) printf("nvn_vk_tex: TEST: pack against decode: worst level %.1f dB, %lld levels under 30 dB\n", g_pack_worst, (long long)g_pack_lowq);
     if (g_tp_n > 0) { LARGE_INTEGER q; QueryPerformanceFrequency(&q); printf("nvn_vk_tex: workers %.1f ms in all\n", (double)g_pack_ns * 1000.0 / (double)q.QuadPart); }
     if (g_tp_n > 0) printf("nvn_vk_tex: decoded ahead by %d threads: %lld used, %lld stale (the memory changed), %lld not finished at their use\n", g_tp_n, (long long)g_tp_hit, (long long)g_tp_stale, (long long)g_tp_late);
-    if (getenv("WT_TEXPREP_CHECK")) printf("nvn_vk_tex: TEST: %lld levels decoded ahead differ from a decode at the use\n", (long long)g_tp_diff);
+    if (getenv("MR_TEXPREP_CHECK")) printf("nvn_vk_tex: TEST: %lld levels decoded ahead differ from a decode at the use\n", (long long)g_tp_diff);
 }
 /* tex_upload_memory with the texels handed to the caller instead of glTexSubImage. */
 int nvn_front_tex_read(Tex *t, int decode, nvn_front_put_fn *put) {
@@ -6014,9 +6014,9 @@ int nvn_front_tex_read(Tex *t, int decode, nvn_front_put_fn *put) {
     if (pj && pj->bc7 != (decode == 3)) { tp_free(pj); pj = NULL; }      /* blocks of the other format: not for this image */
     const uint8_t *pb = pj ? pj->out : NULL;
     uint8_t *pack = NULL;
-    {   /* TEST ONLY: WT_TEXPACK_REDO=1: every second texture as if the game had changed it after the image was made */
+    {   /* TEST ONLY: MR_TEXPACK_REDO=1: every second texture as if the game had changed it after the image was made */
         static int redo = -1;
-        if (redo < 0) redo = getenv("WT_TEXPACK_REDO") != NULL;
+        if (redo < 0) redo = getenv("MR_TEXPACK_REDO") != NULL;
         if (redo && decode == 3 && (tex_pack_hash(src, t->data_size) >> 7 & 1)) { if (pj) { tp_free(pj); pj = NULL; } pb = NULL; g_pack_redo++; goto encode; }
     }
     if (decode == 3 && !pb) {                       /* stored as BC7 and not read ahead: from the pack, if it has these bytes */
@@ -6032,7 +6032,7 @@ encode:
                    need = lin + (decode ? rgba : 0) + (decode >= 2 ? bc3 : 0) + (decode == 3 ? rgba : 0);
             if (pb) {
                 static int chk = -1, pchk = -1;
-                if (chk < 0) { chk = getenv("WT_TEXPREP_CHECK") != NULL; pchk = getenv("WT_TEXPACK_CHECK") != NULL; }
+                if (chk < 0) { chk = getenv("MR_TEXPREP_CHECK") != NULL; pchk = getenv("MR_TEXPACK_CHECK") != NULL; }
                 if (chk && decode == 2) {      /* TEST ONLY */
                     if (need > tmp_cap) { tmp_cap = need * 2; tmp = realloc(tmp, tmp_cap); }
                     tex_deswizzle_level(&L, l, p, tmp);
@@ -6057,9 +6057,9 @@ encode:
             }
             if (!b->packaged && t->limit && p + L.lvl_size[l] > t->limit) return 0;
             if (need > tmp_cap) { tmp_cap = need * 2; tmp = realloc(tmp, tmp_cap); }
-            {   /* TEST ONLY: WT_TEX_RAWDUMP=<dir> (with WT_ASTC_DUMP_ONLY=<format hex>): level 0 as it is in pool memory, and its layout */
+            {   /* TEST ONLY: MR_TEX_RAWDUMP=<dir> (with MR_ASTC_DUMP_ONLY=<format hex>): level 0 as it is in pool memory, and its layout */
                 static const char *rd = (const char *)1; static int only = -2;
-                if (rd == (const char *)1) { rd = getenv("WT_TEX_RAWDUMP"); only = getenv("WT_ASTC_DUMP_ONLY") ? (int)strtol(getenv("WT_ASTC_DUMP_ONLY"), NULL, 16) : -1; }
+                if (rd == (const char *)1) { rd = getenv("MR_TEX_RAWDUMP"); only = getenv("MR_ASTC_DUMP_ONLY") ? (int)strtol(getenv("MR_ASTC_DUMP_ONLY"), NULL, 16) : -1; }
                 if (rd && l == 0 && layer == 0 && (only < 0 || only == b->format) && L.lvl_w[0] >= 256) {
                     char path[600]; FILE *fp;
                     snprintf(path, sizeof path, "%s/%02x_%dx%d_lv%d_bh%d_lay%02x%02x%02x%02x%02x%02x%02x%02x_%p.raw", rd, b->format, b->width, b->height, L.levels, L.lvl_bh_log2[0],
@@ -6073,7 +6073,7 @@ encode:
             if (decode) {
                 unsigned bad0 = tex_astc_bad_blocks;
                 decode_par(b->format, tmp, L.lvl_w[l], L.lvl_h[l], tmp + lin, decode == 2 ? tmp + lin + rgba : NULL);      /* 3: tex_encode_bc7 below */
-                if (tex_astc_bad_blocks != bad0 && getenv("WT_ASTC_LOG"))      /* TEST ONLY: which texture and level the rejected blocks came from */
+                if (tex_astc_bad_blocks != bad0 && getenv("MR_ASTC_LOG"))      /* TEST ONLY: which texture and level the rejected blocks came from */
                     printf("tex_decode: TEST: %u rejected in format 0x%x %dx%d level %d of %d layer %d, layout %02x %02x %02x %02x %02x %02x %02x %02x, flags 0x%x\n", tex_astc_bad_blocks - bad0, b->format, b->width, b->height, l, L.levels, layer,
                            b->layout[0], b->layout[1], b->layout[2], b->layout[3], b->layout[4], b->layout[5], b->layout[6], b->layout[7], (unsigned)b->flags);
                 if (decode == 3) { tex_encode_bc7(tmp + lin, L.lvl_w[l], L.lvl_h[l], tmp + lin + rgba); put(t, l, layer, L.lvl_w[l], L.lvl_h[l], 1, tmp + lin + rgba, bc3, 0, 0); }      /* #54 */
@@ -6103,10 +6103,10 @@ int nvn_front_handle(TexPool *tp, SamplerPool *sp, uint64_t nh, Tex **t, View *v
     return r;
 }
 long long nvn_front_frame_next(void) { return (long long)g_st.frames + 1; }
-/* V1 session 5: compute outputs of the two back ends compared OFFLINE (tests/vk5_ccmp.py). WT_COMPUTE_CMP=<folder>: every
+/* V1 session 5: compute outputs of the two back ends compared OFFLINE (tests/vk5_ccmp.py). MR_COMPUTE_CMP=<folder>: every
  * dispatch is named by a hash of what it reads from guest memory (machine code, group counts, every bound uniform buffer,
  * every bound storage buffer it does not write; of the written ones the size); when what it wrote has landed in guest memory
- * the written ranges go to <folder>/<hash>_<storage index>.bin (the first WT_COMPUTE_CMP_N distinct hashes, default 600).
+ * the written ranges go to <folder>/<hash>_<storage index>.bin (the first MR_COMPUTE_CMP_N distinct hashes, default 600).
  * Two runs (vk, gl) that met the same inputs wrote files of the same name. Render thread only. */
 static struct { uint64_t h, addr, size; int n; } g_ccmp_pend[512];
 static int g_ccmp_npend, g_ccmp_on = -1, g_ccmp_left;
@@ -6120,7 +6120,7 @@ static uint64_t ccmp_hash(uint64_t h, const void *p, size_t n) {
     return h;
 }
 void nvn_front_ccmp_dispatch(const Range *ubo, const Range *ssbo, uint32_t written, const uint8_t *code, int code_len, unsigned gx, unsigned gy, unsigned gz) {
-    if (g_ccmp_on < 0) { g_ccmp_dir = getenv("WT_COMPUTE_CMP"); g_ccmp_on = g_ccmp_dir != NULL; g_ccmp_left = getenv("WT_COMPUTE_CMP_N") ? atoi(getenv("WT_COMPUTE_CMP_N")) : 600; if (g_ccmp_on) CreateDirectoryA(g_ccmp_dir, NULL); }
+    if (g_ccmp_on < 0) { g_ccmp_dir = getenv("MR_COMPUTE_CMP"); g_ccmp_on = g_ccmp_dir != NULL; g_ccmp_left = getenv("MR_COMPUTE_CMP_N") ? atoi(getenv("MR_COMPUTE_CMP_N")) : 600; if (g_ccmp_on) CreateDirectoryA(g_ccmp_dir, NULL); }
     if (!g_ccmp_on || g_ccmp_left <= 0 || !code || code_len <= 0) return;
     uint32_t g[3] = {gx, gy, gz};
     uint64_t h = ccmp_hash(0xcbf29ce484222325ULL, code, (size_t)code_len);
@@ -6128,11 +6128,11 @@ void nvn_front_ccmp_dispatch(const Range *ubo, const Range *ssbo, uint32_t writt
     for (int n = 0; n < 16; n++) if (ubo[n].addr && ubo[n].size) { h = ccmp_hash(h ^ (uint64_t)(n + 1), P(ubo[n].addr), (size_t)ubo[n].size); }
     for (int n = 0; n < 32; n++) {
         if (!ssbo[n].addr || !ssbo[n].size) continue;
-        /* WT_COMPUTE_CMP_MODE=1: storage buffers enter by SIZE only, written or not. Needed for skinning program #16: its
+        /* MR_COMPUTE_CMP_MODE=1: storage buffers enter by SIZE only, written or not. Needed for skinning program #16: its
          * assembly text (OpenGL) declares storage 2 written, the translated machine code (Vulkan) 0, 1 and 2, so the
          * default naming never matches between the two. A false match (same sizes, other contents) shows as a difference. */
         static int mode = -1;
-        if (mode < 0) mode = getenv("WT_COMPUTE_CMP_MODE") ? atoi(getenv("WT_COMPUTE_CMP_MODE")) : 0;
+        if (mode < 0) mode = getenv("MR_COMPUTE_CMP_MODE") ? atoi(getenv("MR_COMPUTE_CMP_MODE")) : 0;
         if (mode == 1 || (written >> n & 1)) h = ccmp_hash(h ^ (uint64_t)(n + 101), &ssbo[n].size, 8);
         else h = ccmp_hash(h ^ (uint64_t)(n + 201), P(ssbo[n].addr), (size_t)ssbo[n].size);
     }
@@ -6216,11 +6216,11 @@ static void vk_shutdown_at_exit(void) {
 
 /* nvnBufferFlushMappedRange / nvnMemoryPoolFlushMappedRange (nvn_stub.c): the CPU wrote this memory. Textures stored there are read again. */
 Tex *nvn_front_tex_first(void) { return g_all_tex; }
-/* [witchtime] The game flushes many ranges a frame from two threads (B3: 83-96 % of MainDraw's and Flush's busy time went
+/* [moonriver] The game flushes many ranges a frame from two threads (B3: 83-96 % of MainDraw's and Flush's busy time went
  * into walking every texture ever made). The live textures with memory, sorted by address (lo), with the running
  * maximum of their ends: a flush finds the last span starting before its end and walks back while that maximum still
  * reaches its start. Rebuilt when a texture is made (the list head moved) or finalized (g_tex_dead_gen).
- * WT_TEXSPAN_CHECK=1: every flush is checked against the plain walk (test). */
+ * MR_TEXSPAN_CHECK=1: every flush is checked against the plain walk (test). */
 typedef struct { uintptr_t lo, hi, maxhi; Tex *t; } TexSpan;
 static TexSpan *g_span;
 static int g_span_n, g_span_cap;
@@ -6252,7 +6252,7 @@ void nvn_gl_memory_written(uint64_t addr, uint64_t size) {
     for (int i = lo - 1; i >= 0 && g_span[i].maxhi > addr; i--)
         if (g_span[i].hi > addr && !g_span[i].t->dead) { g_span[i].t->dirty = 1; marked++; }
     ReleaseSRWLockExclusive(&g_span_lock);
-    if (check < 0) check = getenv("WT_TEXSPAN_CHECK") != NULL;
+    if (check < 0) check = getenv("MR_TEXSPAN_CHECK") != NULL;
     if (check) {
         int want = 0;
         for (Tex *t = head; t; t = t->all_next)
@@ -6262,7 +6262,7 @@ void nvn_gl_memory_written(uint64_t addr, uint64_t size) {
     }
 }
 
-/* [witchtime] NVN 55 entry points that B2's NVN 3.6.0 did not have. Each one logs its first calls (nvn55: ...).
+/* [moonriver] NVN 55 entry points that B2's NVN 3.6.0 did not have. Each one logs its first calls (nvn55: ...).
  * Deferred binds take the same arguments as the plain ones; recorded the same way.
  * shortcut: a deferred bind is read when recorded, not when the command buffer runs; upgrade if a game rewrites the array
  * between recording and submit. */
@@ -6440,7 +6440,7 @@ static const struct { const char *name; ImportFn fn; } k_nvn[] = {
     {"nvnMemoryPoolInvalidateMappedRange", n_nop}, {"nvnDeviceRegisterFastClearColor", n_true}, {"nvnDeviceRegisterFastClearColori", n_true},
     {"nvnDeviceRegisterFastClearColorui", n_true}, {"nvnDeviceRegisterFastClearDepth", n_true}, {"nvnTextureBuilderGetZCullStorageSize", n_zero},
     {"nvnTextureGetZCullStorageSize", n_zero},
-    /* [witchtime] NVN 55 (see above) */
+    /* [moonriver] NVN 55 (see above) */
     {"nvnTextureBuilderGetViewOffset", texb_view_offset},
     {"nvnCommandBufferBindUniformBuffersDeferred", n55_ubos}, {"nvnCommandBufferBindStorageBuffersDeferred", n55_ssbos},
     {"nvnCommandBufferBindTexturesDeferred", n55_textures}, {"nvnCommandBufferBindImagesDeferred", n55_images},

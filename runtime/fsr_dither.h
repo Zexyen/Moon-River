@@ -1,4 +1,4 @@
-/* [witchtime] issue 118, step 2: phase p of FSR_DITHER_PHASES of the game's 64 x 64 dither pattern while FSR runs
+/* [moonriver] issue 118, step 2: phase p of FSR_DITHER_PHASES of the game's 64 x 64 dither pattern while FSR runs
  * (nvn_vk_fsr.c; test: tests/fsr_dither_test.c). The pattern (RGBA8) holds thresholds in R and G = 255 - R: an object fading
  * out discards where its alpha is below R, the other mesh of a cross-fade where its alpha is below G, so the two cover each
  * pixel once. Its values are not spread evenly (none in 96 .. 127), so the phases rotate RANKS, not values: phase p gives texel
