@@ -28,6 +28,7 @@ void recomps_uncap_tick(Ctx *c, float step);
 extern int recomps_fps_tick;
 uint32_t recomps_fps_ci(Ctx *c, uint64_t key, uint64_t field, uint32_t wb, int k, int sign);
 int recomps_fps_cf(Ctx *c, uint64_t key, uint64_t field, float w, int sign);
+float recomps_fps_fs(Ctx *c, uint64_t key, uint64_t field);
 float recomps_fps_lmul(Ctx *c, int slot, uint64_t key, uint64_t field, float a);
 float recomps_fps_lsum(Ctx *c, int slot);
 void recomps_fps_reload(Ctx *c, int C, int X);
@@ -577,6 +578,101 @@ fn patch_f1(
     Err(format!("post_lift: {}: float add has no constant 1.0 operand: {}", what, lines[j].trim()))
 }
 
+fn parse_reg_tok(tok: &str, prefix: char) -> Option<u32> {
+    let rest = tok.strip_prefix(prefix)?;
+    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse().ok()
+}
+
+/// Patch a continuous float step (`fs` store-labeled or `fsop` op-labeled) using `recomps_fps_fs`.
+/// Scales any constant or loaded step (e.g. `±1/60.0f` second-based timers, `±1.0f` animation phases,
+/// or per-frame rotation/fade deltas) by the continuous 60 Hz frame step so high-FPS motion stays smooth
+/// and runs at true 60 FPS speed.
+fn patch_fs(
+    lines: &mut [String],
+    lo: usize,
+    hi: usize,
+    mut i: usize,
+    key: u64,
+    op_mode: bool,
+    step_reg: Option<u32>,
+    field_reg: Option<u32>,
+) -> Result<(), String> {
+    let what = lines[i].split(':').next().unwrap_or("?").to_string();
+    let (j, field_expr) = if let Some(freg) = field_reg {
+        if !op_mode {
+            return Err(format!("post_lift: {}: field register x{} requires fsop", what, freg));
+        }
+        (i, format!("c->x[{}]", freg))
+    } else {
+        let j = if op_mode {
+            let p = lines[i].find("vzero(&c->v[").ok_or_else(|| format!("post_lift: {}: no vzero", what))?;
+            let (d, _) = parse_u32_prefix(&lines[i][p + "vzero(&c->v[".len()..])
+                .ok_or_else(|| format!("post_lift: {}: bad vzero", what))?;
+            let store_pat = format!("wrv(a, &c->v[{}], 4)", d);
+            let st = ((i + 1)..hi.min(i + 16))
+                .find(|&k| lines[k].contains(&store_pat))
+                .ok_or_else(|| format!("post_lift: {}: store for v{} not found", what, d))?;
+            let op_idx = i;
+            i = st;
+            op_idx
+        } else {
+            let p = lines[i].find("wrv(a, &c->v[").ok_or_else(|| format!("post_lift: {}: no wrv", what))?;
+            let (v, _) = parse_u32_prefix(&lines[i][p + "wrv(a, &c->v[".len()..])
+                .ok_or_else(|| format!("post_lift: {}: bad wrv", what))?;
+            ((lo + 1)..i)
+                .rev()
+                .find(|&k| match_vdef(&lines[k], v))
+                .ok_or_else(|| format!("post_lift: {}: no v{} def before store", what, v))?
+        };
+        let (base, off) = store_field(&lines[i])?;
+        check_base(lines, j, i, base, &what)?;
+        (j, format!("c->x[{}] + {}ULL", base, off))
+    };
+
+    let (r1, op, r2) = parse_faddsub_line(&lines[j])
+        .ok_or_else(|| format!("post_lift: {}: no float add/sub: {}", what, lines[j].trim()))?;
+
+    let step = if let Some(sr) = step_reg {
+        if sr != r1 && sr != r2 {
+            return Err(format!("post_lift: {}: step reg v{} not an operand of {}", what, sr, lines[j].trim()));
+        }
+        if op == '-' && sr == r1 {
+            return Err(format!("post_lift: {}: step - x is not a counter", what));
+        }
+        sr
+    } else {
+        let (base, off) = store_field(&lines[i])?;
+        let mut found = None;
+        for (st, x) in [(r2, r1), (r1, r2)] {
+            if op == '-' && st == r1 {
+                continue;
+            }
+            let k_lo = lo.max(j.saturating_sub(24));
+            for k in (k_lo..j).rev() {
+                if match_ldv(&lines[k], base, off, x) {
+                    found = Some(st);
+                    break;
+                }
+                if match_vdef(&lines[k], x) || (x < 8 && is_call(&lines[k])) || assigns_x(&lines[k], base) {
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        found.ok_or_else(|| format!("post_lift: {}: fs field load not found", what))?
+    };
+
+    let old = format!("c->v[{}].f[0]", step);
+    let rep = format!("({} * recomps_fps_fs(c, 0x{:x}ULL, {}))", old, key, field_expr);
+    lines[j] = replace_in_fnan32(&lines[j], &old, &rep)?;
+    Ok(())
+}
+
 pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), String> {
     let mut c_files: Vec<String> = fs::read_dir(gen_dir)
         .map_err(|e| format!("{}: {}", gen_dir.display(), e))?
@@ -775,6 +871,27 @@ pub fn post_lift(gen_dir: &Path, log: &mut dyn FnMut(String)) -> Result<(), Stri
             "f1lin" => {
                 patch_f1(ls, lo, hi, i, key, false, Some(lin_slots), false)?;
                 lin_slots += 1;
+            }
+            "fs" | "fsop" => {
+                let op_mode = kind == "fsop";
+                let mut step_reg = None;
+                let mut field_reg = None;
+                for &tok in cols.iter().skip(3).take(2) {
+                    if step_reg.is_none() {
+                        if let Some(v) = parse_reg_tok(tok, 'v') {
+                            step_reg = Some(v);
+                            continue;
+                        }
+                    }
+                    if field_reg.is_none() {
+                        if let Some(x) = parse_reg_tok(tok, 'x') {
+                            field_reg = Some(x);
+                            continue;
+                        }
+                    }
+                    break;
+                }
+                patch_fs(ls, lo, hi, i, key, op_mode, step_reg, field_reg)?;
             }
             _ => return Err(format!("post_lift: {} {}: unknown kind {}", fn_hex, lab, kind)),
         }
@@ -1089,5 +1206,55 @@ mod tests {
             "L_7100b7a768: if (((c->x[8] >> 4) & 1) == 0) return;"
         )
         .is_err());
+    }
+
+    #[test]
+    fn fs_patch_store_and_op_modes() {
+        // Store-labeled -1/60 timer (ComboRow f_7100c8fa98 pattern)
+        let mut lines: Vec<String> = vec![
+            "void f_7100c8fa98(Ctx *c) {",
+            "L_7100c8fb64: {  uint64_t a = c->x[19] + 400ULL; c->v[0] = rdv(a, 4);  }",
+            "L_7100c8fb78: c->x[8] = (uint64_t)(0x7101462000ULL);",
+            "L_7100c8fb7c: {  uint64_t a = c->x[8] + 1956ULL; c->v[1] = rdv(a, 4);  }",
+            "L_7100c8fb80: { float t = fnan32(c->v[0].f[0] + c->v[1].f[0]); vzero(&c->v[0]); c->v[0].f[0] = t; }",
+            "L_7100c8fb84: fcmp(c, (double)c->v[0].f[0], (double)0);",
+            "L_7100c8fb88: {  uint64_t a = c->x[19] + 400ULL; wrv(a, &c->v[0], 4);  }",
+            "}",
+        ].into_iter().map(String::from).collect();
+        patch_fs(&mut lines, 0, 7, 6, 0x7100c8fb88, false, None, None).unwrap();
+        assert!(lines[4].contains("(c->v[1].f[0] * recomps_fps_fs(c, 0x7100c8fb88ULL, c->x[19] + 400ULL))"));
+
+        // Op-labeled wrap animation with csel before store (Chapter Select Card bobbing f_7100601964 pattern)
+        let mut card: Vec<String> = vec![
+            "void f_7100601964(Ctx *c) {",
+            "L_710060198c: {  uint64_t a = c->x[19] + 1456ULL; c->v[0] = rdv(a, 4);  }",
+            "L_7100601990: { float t = fnan32((float)1.0); vzero(&c->v[1]); c->v[1].f[0] = t; }",
+            "L_7100601994: c->x[8] = (uint64_t)(0x7101462000ULL);",
+            "L_7100601998: { float t = fnan32(c->v[0].f[0] + c->v[1].f[0]); vzero(&c->v[0]); c->v[0].f[0] = t; }",
+            "L_710060199c: {  uint64_t a = c->x[8] + 2376ULL; c->v[1] = rdv(a, 4);  }",
+            "L_71006019a0: c->x[8] = (uint64_t)(0x7101462000ULL);",
+            "L_71006019a4: {  uint64_t a = c->x[8] + 1184ULL; c->v[2] = rdv(a, 4);  }",
+            "L_71006019a8: c->x[8] = (uint64_t)(0x7101462000ULL);",
+            "L_71006019ac: { float t = fnan32(c->v[0].f[0] + c->v[1].f[0]); vzero(&c->v[1]); c->v[1].f[0] = t; }",
+            "L_71006019b0: fcmp(c, (double)c->v[0].f[0], (double)c->v[2].f[0]);",
+            "L_71006019b4: { float t = fnan32(cond(c, 12) ? c->v[1].f[0] : c->v[0].f[0]); vzero(&c->v[0]); c->v[0].f[0] = t; }",
+            "L_71006019b8: {  uint64_t a = c->x[8] + 1320ULL; c->v[1] = rdv(a, 4);  }",
+            "L_71006019bc: c->x[8] = (uint64_t)(0x7101462000ULL);",
+            "L_71006019c0: {  uint64_t a = c->x[19] + 1456ULL; wrv(a, &c->v[0], 4);  }",
+            "}",
+        ].into_iter().map(String::from).collect();
+        patch_fs(&mut card, 0, 15, 4, 0x7100601998, true, None, None).unwrap();
+        assert!(card[4].contains("(c->v[1].f[0] * recomps_fps_fs(c, 0x7100601998ULL, c->x[19] + 1456ULL))"));
+
+        // Explicit step_reg + field_reg (Chapter Select Card rotation f_7100601da4 pattern)
+        let mut rot: Vec<String> = vec![
+            "void f_7100601da4(Ctx *c) {",
+            "L_7100601ed0: { float t = fnan32(c->v[0].f[0] + c->v[1].f[0]); vzero(&c->v[9]); c->v[9].f[0] = t; }",
+            "L_7100601edc: c->x[30] = 0x7100601ee0ULL; f_7100963a90(c);",
+            "L_7100601ee0: {  uint64_t a = c->x[0] + 132ULL; wrv(a, &c->v[9], 4);  }",
+            "}",
+        ].into_iter().map(String::from).collect();
+        patch_fs(&mut rot, 0, 4, 1, 0x7100601ed0, true, Some(1), Some(19)).unwrap();
+        assert!(rot[1].contains("(c->v[1].f[0] * recomps_fps_fs(c, 0x7100601ed0ULL, c->x[19]))"));
     }
 }
