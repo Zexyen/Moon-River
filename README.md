@@ -2,6 +2,10 @@
   <img src="docs/images/moon-river-logo.svg" alt="Moon River" width="720">
 </p>
 
+<p align="center">
+  <a href="https://recomplauncher.com"><picture><source media="(prefers-color-scheme: dark)" srcset="https://recomplauncher.com/assets/press/launcher/badge-light.svg"><img alt="Get it on RecompLauncher" src="https://recomplauncher.com/assets/press/launcher/badge-dark.svg" height="48"></picture></a>
+</p>
+
 # Moon River
 
 A static recompilation of **Bayonetta 2** (Nintendo Switch, version 1.2 / update v131072) for PC, built on the
@@ -86,6 +90,19 @@ MR_ROMFS="$PWD/targets/romfs" ./build/moon-river-game targets/exefs/main.elf
 ```
 
 Press **F1** (or **Start + Select** on a controller) in-game to open the PC Settings panel.
+
+## RecompLauncher
+
+Moon River ships [`recomplauncher.json`](recomplauncher.json) in every release for [RecompLauncher](https://recomplauncher.com):
+pick your NSP/XCI files (with your `prod.keys`) or extracted Update 1.2 dump folder there and Easy Setup builds the game
+without a window (`moon-river-launcher --prepare`), exposes display, graphics, and controller settings on the game's
+page, and launches with `moon-river-launcher --play`.
+
+When started by RecompLauncher (`RECOMPLAUNCHER=1`), the built-in updater is disabled and settings, saves, logs (last
+five runs), and shader caches are kept in `recompdata/` (`--data <folder>` or `MR_DATA` does the same anywhere), while
+the built game stays in `build/` and `targets/`. Big Picture mode starts windowed installs borderless, and Auto button
+prompts follow `RECOMPLAUNCHER_PAD` until a controller is seen. On Linux, releases are packaged both as `.tar.gz` and as
+an `.AppImage` of the same folder (unpacked by RecompLauncher on install, or copied beside the AppImage on first run).
 
 ## Repository Layout
 
