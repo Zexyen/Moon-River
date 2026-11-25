@@ -1,4 +1,4 @@
-# roots for the sdk lift (tools/wtbuild/src/sdklift.rs), for Bayonetta 2's sdk (nnSdk / NVN 3.6.0).
+# roots for the sdk lift (tools/mrbuild/src/sdklift.rs), for Bayonetta 2's sdk (nnSdk / NVN 3.6.0).
 # Every NVN entry point and GPU HAL method is found by name / typeinfo from the player's own sdk.elf.
 
 # nvn_sdk.c: texture storage rules (NVN 3.6.0 has no GetRawStorageClass)

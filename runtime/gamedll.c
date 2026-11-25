@@ -13,7 +13,7 @@ typedef struct {
     void (*guest_unimpl)(uint64_t, uint32_t, const char *);
     void (*guest_svc)(Ctx *, uint32_t);
     void (*stx_diag)(Ctx *, uint64_t, uint64_t, uint64_t, uint64_t, int);
-    void (*sdk_dispatch)(Ctx *, uint64_t);           /* [witchtime] game_shim.c */
+    void (*sdk_dispatch)(Ctx *, uint64_t);           /* [moonriver] game_shim.c */
     void (*sdk_host_call)(Ctx *, int);
     void (*sdk_trap_call)(Ctx *, const char *);
 } GameHost;

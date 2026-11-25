@@ -191,7 +191,7 @@ int tex_rule_mip_block_depth_log2(int depth, int bd0) {
     return bd0;
 }
 
-/* [witchtime] gobs_x: GOBs in a row (a texture with a block width wider than one GOB pads its rows: layout byte 1); 0 = the width's */
+/* [moonriver] gobs_x: GOBs in a row (a texture with a block width wider than one GOB pads its rows: layout byte 1); 0 = the width's */
 static size_t bl_size(int wbytes, int gobs_x, int hrows, int depth, int bh_log2, int bd_log2) {
     size_t pitch = gobs_x ? (size_t)gobs_x * 64 : ((size_t)wbytes + 63) / 64 * 64, rows = 8 << bh_log2, slices = (size_t)1 << bd_log2;
     rows = ((size_t)hrows + rows - 1) / rows * rows;
@@ -292,7 +292,7 @@ int tex_layout(TexLayout *L, int target, int nf, int width, int height, int dept
             L->lvl_w[l] = w; L->lvl_h[l] = h; L->lvl_d[l] = d; L->lvl_wb[l] = wb; L->lvl_hb[l] = hb;
             if (L->levels == 1) { L->lvl_bh_log2[l] = L->bh_log2; L->lvl_bd_log2[l] = L->bd_log2; }      /* a single level keeps the block as given */
             else { L->lvl_bh_log2[l] = tex_rule_mip_block_height_log2(hb, L->bh_log2); L->lvl_bd_log2[l] = tex_rule_mip_block_depth_log2(d, L->bd_log2); }
-            {   /* [witchtime] block width (packaged layout byte 1, log2 GOBs): rows padded to a multiple of it; a mip level narrower
+            {   /* [moonriver] block width (packaged layout byte 1, log2 GOBs): rows padded to a multiple of it; a mip level narrower
                  * than one block is not padded at all (B3's ASTC 6x6 effect atlases, byte 1 = 4: 43 -> 48, 22 -> 32, then 11, 6, ...
                  * as the game's own mip chains lie in memory) */
                 int gobs = (wb * f->bpb + 63) / 64, bwl = packaged_bw_log2 > 0 && packaged_bw_log2 <= 5 ? packaged_bw_log2 : 0;
@@ -304,7 +304,7 @@ int tex_layout(TexLayout *L, int target, int nf, int width, int height, int dept
             off += L->lvl_size[l];
         }
         block = (size_t)512 << (tex_rule_mip_block_height_log2(L->lvl_hb[0], L->bh_log2) + tex_rule_mip_block_depth_log2(L->lvl_d[0], L->bd_log2));
-        if (L->lvl_gobs_x[0]) block <<= packaged_bw_log2;      /* [witchtime] the block width too */
+        if (L->lvl_gobs_x[0]) block <<= packaged_bw_log2;      /* [moonriver] the block width too */
         L->layer_size = off;
         L->layer_stride = (off + block - 1) / block * block;
         L->alignment = block;
@@ -841,7 +841,7 @@ static void bit_transfer_signed(int *a, int *b) {
 }
 static void blue_contract(int *e) { e[0] = (e[0] + e[2]) >> 1; e[1] = (e[1] + e[2]) >> 1; }
 
-/* [witchtime] HDR colour endpoint modes (Khronos Data Format Specification, "HDR endpoint decoding"): 12-bit values in the
+/* [moonriver] HDR colour endpoint modes (Khronos Data Format Specification, "HDR endpoint decoding"): 12-bit values in the
  * logarithmic (LNS) domain. Tegra's hardware decodes them in the LDR formats too (full profile); this decoder used to give
  * such blocks the error colour. (B3's chapter 1 has none: its magenta came from invalid blocks, see "bad:" below.) Checked
  * against ARM's astc-encoder on random blocks: tools/astccmp.cpp. */
@@ -1127,7 +1127,7 @@ static void astc_block(const uint8_t *blk, uint8_t *out, int pitch, int bw, int 
             }
         }
     return;
-bad:      /* [witchtime] an invalid block (B3: all-zero blocks in a shared mask texture, 102,942 in chapter 1) is transparent black, as
+bad:      /* [moonriver] an invalid block (B3: all-zero blocks in a shared mask texture, 102,942 in chapter 1) is transparent black, as
           * on Tegra (yuzu PR #8910 made its decoders do the same), not the specification's magenta error colour */
     tex_astc_bad_blocks++;
     astc_fill(out, pitch, bw, bh, 0, 0, 0, 0);
@@ -1186,8 +1186,8 @@ int tex_decode_rgba8(int nf, const void *src, int w, int h, uint8_t *dst) {
     uint8_t tmp[12 * 12 * 4];
     if (!f || !f->codec) return -1;
     wb = (w + f->bw - 1) / f->bw; hb = (h + f->bh - 1) / f->bh;
-    static int alog = -1, nalog;                          /* TEST ONLY: WT_ASTC_LOG=1: each image with blocks the decoder rejects (format, size, count, the first block) */
-    if (alog < 0) alog = getenv("WT_ASTC_LOG") != NULL;
+    static int alog = -1, nalog;                          /* TEST ONLY: MR_ASTC_LOG=1: each image with blocks the decoder rejects (format, size, count, the first block) */
+    if (alog < 0) alog = getenv("MR_ASTC_LOG") != NULL;
     unsigned bad0 = tex_astc_bad_blocks;
     const uint8_t *first_bad = NULL;
     const uint8_t *first_nonzero = NULL;
@@ -1215,12 +1215,12 @@ int tex_decode_rgba8(int nf, const void *src, int w, int h, uint8_t *dst) {
                 for (y = 0; y < ch; y++) memcpy(dst + (size_t)(y0 + y) * pitch + x0 * 4, tmp + y * f->bw * 4, (size_t)cw * 4);
             }
         }
-    {   /* TEST ONLY: WT_ASTC_DUMP=<dir>: every ASTC image of 256 texels or more decoded here, once per content: <dir>/<format>_<w>x<h>_<hash>.astc
+    {   /* TEST ONLY: MR_ASTC_DUMP=<dir>: every ASTC image of 256 texels or more decoded here, once per content: <dir>/<format>_<w>x<h>_<hash>.astc
          * (the blocks, rows of blocks, 16 bytes each) and .pam (what this decoder made, RGBA 8-bit) for tools/astccmp.cpp --file */
         static const char *ddir = (const char *)1;
-        if (ddir == (const char *)1) ddir = getenv("WT_ASTC_DUMP");
+        if (ddir == (const char *)1) ddir = getenv("MR_ASTC_DUMP");
         static int donly = -2;
-        if (donly == -2) donly = getenv("WT_ASTC_DUMP_ONLY") ? (int)strtol(getenv("WT_ASTC_DUMP_ONLY"), NULL, 16) : -1;      /* one NVN format (hex) */
+        if (donly == -2) donly = getenv("MR_ASTC_DUMP_ONLY") ? (int)strtol(getenv("MR_ASTC_DUMP_ONLY"), NULL, 16) : -1;      /* one NVN format (hex) */
         if (ddir && f->codec == TEX_CODEC_ASTC && (w >= 256 || h >= 256) && (donly < 0 || donly == nf)) {
             uint64_t hsh = 1469598103934665603ull;
             size_t nb = (size_t)wb * hb * 16;

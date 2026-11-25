@@ -64,7 +64,7 @@ M2F(m_atan2f, atan2f) M2F(m_powf, powf) M2F(m_fmodf, fmodf)
 M1D(m_sin, sin) M1D(m_cos, cos) M1D(m_tan, tan)
 M1D(m_exp, exp) M1D(m_log, log) M1D(m_log2, log2) M1D(m_log10, log10)
 M2D(m_pow, pow) M2D(m_fmod, fmod) M2D(m_atan2, atan2)
-M1F(m_sinhf, sinhf) M1F(m_coshf, coshf) M1F(m_asinhf, asinhf) M1F(m_acoshf, acoshf) M1D(m_sqrt, sqrt)    /* [witchtime] program 1 */
+M1F(m_sinhf, sinhf) M1F(m_coshf, coshf) M1F(m_asinhf, asinhf) M1F(m_acoshf, acoshf) M1D(m_sqrt, sqrt)    /* [moonriver] program 1 */
 
 static const ImportDef base_imports[] = {
     {"memalign", i_aligned_alloc},
@@ -108,13 +108,13 @@ int guest_thread_count(void);
 extern uint64_t g_main_stack_base, g_main_stack_size;
 
 void dump_guest_threads(FILE *out);      /* os_threads.c */
-void icall_dump(FILE *out, uint64_t main_ctx);   /* hostrt.c, WT_ICALLS */
+void icall_dump(FILE *out, uint64_t main_ctx);   /* hostrt.c, MR_ICALLS */
 uint64_t icall_first_x0(uint64_t target);
 static Ctx *g_main_ctx;
 
 static const char *g_elf;
 
-/* Debug aid: WT_PROF=<start s>,<duration s> samples the main guest thread's host stack every ~2 ms in that
+/* Debug aid: MR_PROF=<start s>,<duration s> samples the main guest thread's host stack every ~2 ms in that
  * window, unwinds it to guest functions and prints every (caller -> callee) pair seen with its sample count. */
 #define PROF_MAX 8192
 static struct { uint64_t callee, caller; unsigned n; } g_prof[PROF_MAX];
@@ -124,11 +124,11 @@ static DWORD WINAPI profiler(LPVOID arg) {
     int start = 0, dur = 0;
     (void)arg;
     char mode = 's';
-    if (sscanf(getenv("WT_PROF"), "%d,%d,%c", &start, &dur, &mode) < 2 || dur <= 0) return 0;
+    if (sscanf(getenv("MR_PROF"), "%d,%d,%c", &start, &dur, &mode) < 2 || dur <= 0) return 0;
     Sleep((DWORD)start * 1000);
     ULONGLONG end = GetTickCount64() + (ULONGLONG)dur * 1000;
     unsigned samples = 0;
-    if (mode == 'f') {        /* WT_PROF=<start>,<dur>,f : spin reading c->fn / x30: every function the main thread enters */
+    if (mode == 'f') {        /* MR_PROF=<start>,<dur>,f : spin reading c->fn / x30: every function the main thread enters */
         while (GetTickCount64() < end) {
             for (int r = 0; r < 4096; r++) {
                 uint64_t callee = g_main_ctx->fn, caller = g_main_ctx->x[30];
@@ -181,13 +181,13 @@ static DWORD WINAPI profiler(LPVOID arg) {
 }
 
 #ifdef __linux__
-#include "lprof.c"        /* [witchtime] WT_LPROF: Linux sampling profiler of every thread (test only); included like prof15.c */
+#include "lprof.c"        /* [moonriver] MR_LPROF: Linux sampling profiler of every thread (test only); included like prof15.c */
 #endif
-#include "prof15.c"       /* WT_PROF15: sampling profiler of every busy thread (test only). Included here, like nvn_vk.c includes its parts, so that
+#include "prof15.c"       /* MR_PROF15: sampling profiler of every busy thread (test only). Included here, like nvn_vk.c includes its parts, so that
                            * every link that has boot.c has it (build.py's source list is not changed): do NOT name prof15.c as a source of its own. */
 
 static size_t main_stack_size_from_npdm(void) {
-    const char *ov = getenv("WT_MAIN_STACK");
+    const char *ov = getenv("MR_MAIN_STACK");
     if (ov && strtoull(ov, NULL, 0) >= 0x10000) return (size_t)(strtoull(ov, NULL, 0) + 0xfff) & ~(size_t)0xfff;
     char path[1024];
     snprintf(path, sizeof path, "%s", g_elf);
@@ -227,7 +227,7 @@ static DWORD WINAPI guest_main(LPVOID arg) {
      * 0x100000 for this game; read from the file next to the ELF), with no-access pages below and above it, so that an
      * overflow faults as it does on the console instead of running on. Guest frames are the original's (the lifted code
      * moves the guest SP exactly as the ARM code does); the host's own frames live on the host stack and are not
-     * guest-visible. WT_MAIN_STACK=<bytes> overrides (diagnosis only). */
+     * guest-visible. MR_MAIN_STACK=<bytes> overrides (diagnosis only). */
     size_t stack_size = main_stack_size_from_npdm();
     uint8_t *stack_res = plat_reserve(stack_size + 0x20000);
     uint8_t *stack = stack_res && plat_commit(stack_res + 0x10000, stack_size) ? stack_res + 0x10000 : NULL;
@@ -237,12 +237,12 @@ static DWORD WINAPI guest_main(LPVOID arg) {
     c.tpidr = (uint64_t)tls;
     { uint64_t os_main_thread_type(void); memcpy(tls + 0x1f8, &(uint64_t){os_main_thread_type()}, 8); }   /* [sdk 0x3349dc..e0] nn::os::detail::ThreadManager(): the main thread's ThreadType pointer */
     g_main_ctx = &c;
-    { void os_apply_main_sched(void); os_apply_main_sched(); }                  /* os_threads.c: WT_OS_CONSOLE_CORES=1 */
-    { void hitch_set_main(Ctx *c); hitch_set_main(&c); }      /* hitch.c: WT_HITCH */
+    { void os_apply_main_sched(void); os_apply_main_sched(); }                  /* os_threads.c: MR_OS_CONSOLE_CORES=1 */
+    { void hitch_set_main(Ctx *c); hitch_set_main(&c); }      /* hitch.c: MR_HITCH */
     g_main_stack_base = (uint64_t)stack;
     g_main_stack_size = stack_size;
 
-    /* [witchtime] main's DT_INIT first, as the loader runs it: its __nnmusl_init_dso registers main's TLS (b3_imports.c) */
+    /* [moonriver] main's DT_INIT first, as the loader runs it: its __nnmusl_init_dso registers main's TLS (mr_imports.c) */
     printf("\n[phase 0] DT_INIT\n");
     call_guest(&c, GUEST_BASE + DT_INIT_OFF);
 
@@ -270,18 +270,18 @@ static DWORD WINAPI guest_main(LPVOID arg) {
     return 0;
 }
 
-static int b3_main(int argc, char **argv) {
+static int mr_main(int argc, char **argv) {
     g_elf = argc > 1 ? argv[1] : "main.elf";        /* [Recomps#1] path of our main.elf; sdk.elf must sit beside it */
     setvbuf(stdout, NULL, _IONBF, 0);
 #ifdef __APPLE__
-    { void plat_guest_space(char **argv); plat_guest_space(argv); }      /* [witchtime] plat_posix.c: the game's addresses, before anything else takes them */
+    { void plat_guest_space(char **argv); plat_guest_space(argv); }      /* [moonriver] plat_posix.c: the game's addresses, before anything else takes them */
 #endif
     if (argc <= 1) {    /* started by hand with no path (issues #17, #20): say how it is started instead of "cannot open main.elf" */
         FILE *f = fopen(g_elf, "rb");
         if (!f) {
-            fprintf(stderr, "witch-time-game: no main.elf given. Start the game with the launcher (recomp-launcher, its Play button): it passes\n"
+            fprintf(stderr, "moon-river-game: no main.elf given. Start the game with the launcher (moon-river-launcher, its Play button): it passes\n"
                             "the path of targets/exefs/main.elf and the game's folders and settings. By hand, as the launcher does, from build/run:\n"
-                            "  WT_ROMFS=<Witch Time folder>/targets/romfs ../witch-time-game ../../targets/exefs/main.elf\n");
+                            "  MR_ROMFS=<Moon River folder>/targets/romfs ../moon-river-game ../../targets/exefs/main.elf\n");
             return 1;
         }
         fclose(f);
@@ -293,7 +293,7 @@ static int b3_main(int argc, char **argv) {
     {   /* pad tools and their self-test (nnpad_sdl.c): no game is started */
         int nnhid_pad_selftest(void), nnpad_tool(int, char **);
         int tool;
-        if (getenv("WT_PAD_SELFTEST")) return nnhid_pad_selftest() != 0;
+        if (getenv("MR_PAD_SELFTEST")) return nnhid_pad_selftest() != 0;
         if ((tool = nnpad_tool(argc, argv)) >= 0) return tool;
     }
     /* track V: `--prepare-shaders [folder]` translates every stage of the shader containers in the folder (default
@@ -307,7 +307,7 @@ static int b3_main(int argc, char **argv) {
         import_set_address(sdk_data[i].name, copy);
     }
     cxxrt_install_data();
-    runtime_init(g_elf, getenv("WT_TRACE") ? getenv("WT_TRACE") : "boot_trace.txt");
+    runtime_init(g_elf, getenv("MR_TRACE") ? getenv("MR_TRACE") : "boot_trace.txt");
     register_imports(base_imports, (int)(sizeof base_imports / sizeof base_imports[0]));
     register_sdk_imports();
     register_cxx_imports();
@@ -323,30 +323,30 @@ static int b3_main(int argc, char **argv) {
     register_movie_imports();
     register_misc_imports();                 /* only fills names nobody else implements */
     register_audio_imports();
-    register_movie_mf_imports();             /* replaces nnmovie.c's failing placeholder unless WT_MOVIE=0 */
+    register_movie_mf_imports();             /* replaces nnmovie.c's failing placeholder unless MR_MOVIE=0 */
     register_iostream_imports();             /* libc++ stream base classes */
     register_cxxrt_imports();                /* C / C++ runtime: everything still without a handler (keep last) */
     register_unwind_imports();               /* installs the unwinder the C++ runtime calls on a throw */
     { void register_r2_imports(void); register_r2_imports(); }   /* [Recomps#1] R2: our SDK 3.6.0 imports (r2_imports.c); register_sdk2 below only fills gaps */
-    { void register_b3_imports(void); register_b3_imports(); }   /* [witchtime] Bayonetta 3's SDK 13.3.2 imports (b3_imports.c) */
-    { void program_switch_take(void); program_switch_take(); }   /* [witchtime] a launch parameter left by the other program (issue 115) */
+    { void register_mr_imports(void); register_mr_imports(); }   /* [moonriver] Bayonetta 3's SDK 13.3.2 imports (mr_imports.c) */
+    { void program_switch_take(void); program_switch_take(); }   /* [moonriver] a launch parameter left by the other program (issue 115) */
     register_sdk2_imports();                 /* SDK families (lifted sdk.elf code + offline service answers): fills only; after the C runtime because its self-test needs every handler */
-    { void audit_startup(void); audit_startup(); }   /* hostrt.c: fake audit / WT_STRICT (plan\FAKE_AUDIT.md) */
+    { void audit_startup(void); audit_startup(); }   /* hostrt.c: fake audit / MR_STRICT (plan\FAKE_AUDIT.md) */
     display_init();
     int seconds = argc > 2 ? atoi(argv[2]) : 0;      /* no number = no time limit (a player's launch); tests pass theirs */
 #ifdef __APPLE__
-    /* [witchtime] macOS: this thread, the program's first, is the only one the window's events can be read on: it reads
+    /* [moonriver] macOS: this thread, the program's first, is the only one the window's events can be read on: it reads
      * them while it waits for the game's thread (display.c) */
     DWORD display_main_wait(HANDLE t, DWORD ms);
 #define WaitForSingleObject(t, ms) display_main_wait((t), (ms))
 #endif
     /* the lifted code uses the host stack for every guest call: give it plenty */
     HANDLE t = CreateThread(NULL, (SIZE_T)1 << 30, guest_main, NULL, STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
-    if (getenv("WT_PROF")) { g_prof_target = t; CloseHandle(CreateThread(NULL, 0, profiler, NULL, 0, NULL)); }
+    if (getenv("MR_PROF")) { g_prof_target = t; CloseHandle(CreateThread(NULL, 0, profiler, NULL, 0, NULL)); }
     { void prof15_start(void); prof15_start(); }
 #ifdef __linux__
     lprof_start();
-#endif         /* prof15.c: WT_PROF15, every busy thread (test only; nothing without the variable) */
+#endif         /* prof15.c: MR_PROF15, every busy thread (test only; nothing without the variable) */
     DWORD wr = WaitForSingleObject(t, seconds > 0 ? (DWORD)seconds * 1000 : INFINITE);
     {   unsigned nvn_gl_held_ms(void);                   /* nvn_gl.c: time the presents were held for shader preparation is not run time */
         for (unsigned done = 0, h; wr == WAIT_TIMEOUT && (h = nvn_gl_held_ms()) > done + 50; done = h) wr = WaitForSingleObject(t, h - done);
@@ -395,11 +395,11 @@ static int b3_main(int argc, char **argv) {
         }
         dump_guest_threads(stdout);
         icall_dump(stdout, (uint64_t)(uintptr_t)g_main_ctx);
-        if (getenv("WT_CHAIN")) {
-            /* WT_CHAIN=<fn>:<off>,<off>,...[;<fn>:...] (hex): start from x0 of the first recorded indirect call to fn
-             * (needs WT_ICALLS), follow pointers at the given offsets, print 0x40 bytes at every step */
+        if (getenv("MR_CHAIN")) {
+            /* MR_CHAIN=<fn>:<off>,<off>,...[;<fn>:...] (hex): start from x0 of the first recorded indirect call to fn
+             * (needs MR_ICALLS), follow pointers at the given offsets, print 0x40 bytes at every step */
             char buf[1024];
-            snprintf(buf, sizeof buf, "%s", getenv("WT_CHAIN"));
+            snprintf(buf, sizeof buf, "%s", getenv("MR_CHAIN"));
             for (char *spec = strtok(buf, ";"); spec; spec = strtok(NULL, ";")) {
                 char *colon = strchr(spec, ':');
                 uint64_t p = icall_first_x0(strtoull(spec, NULL, 16));
@@ -424,11 +424,11 @@ static int b3_main(int argc, char **argv) {
 #undef WaitForSingleObject
 }
 
-int main(int argc, char **argv) { return b3_main(argc, argv); }
+int main(int argc, char **argv) { return mr_main(argc, argv); }
 
-/* [witchtime] the same entry in libwitchtime.so (tools/wtbuild/src/link.rs, Linux): the Witch Time launcher (launcher/) loads it
+/* [moonriver] the same entry in libmoonriver.so (tools/mrbuild/src/link.rs, Linux): the Moon River launcher (launcher/) loads it
  * and calls this to run the game in its own process and window (display.c takes the launcher's window) */
-int wt_host_main(int argc, char **argv) {
+int mr_host_main(int argc, char **argv) {
     __argc = argc; __argv = argv;     /* the process's own are the launcher's: sdk.elf is found next to main.elf (sdklift_rt.c, nvn_vk_store.c) */
-    return b3_main(argc, argv);
+    return mr_main(argc, argv);
 }

@@ -1,12 +1,12 @@
-//! The lifter's semantic check (developers): words lifted by the shipped lifter (`wtbuild lift-words`) run in Unicorn
+//! The lifter's semantic check (developers): words lifted by the shipped lifter (`mrbuild lift-words`) run in Unicorn
 //! and, as the lifted statement, in a generated C program built on the real runtime helpers (-I runtime); all 32 V
 //! registers, X0..X30, SP and a 256-byte buffer must come out the same. Replaces lifter/test_ext.py and
-//! lifter/test_b3.py, which checked the Python lifter. Never part of a release: Unicorn is GPL-2.0.
+//! lifter/test_mr.py, which checked the Python lifter. Never part of a release: Unicorn is GPL-2.0.
 //!
-//!   lifter-check [--main <main.elf> | --synthetic N] [--trials N] [--seed N] [--keep] [--wtbuild <path>]
+//!   lifter-check [--main <main.elf> | --synthetic N] [--trials N] [--seed N] [--keep] [--mrbuild <path>]
 //!
 //! --main (default targets/exefs/main.elf): every word of the player's .text in one of test_ext's FORMS, and every
-//! AdvSIMD word whose statement uses a [witchtime] form of test_b3 (b3_form) or that is a one-lane / replicate
+//! AdvSIMD word whose statement uses a [moonriver] form of test_mr (mr_form) or that is a one-lane / replicate
 //! ld2-4 / st2-4. --synthetic N: N random words of FORMS that Unicorn's A57 accepts (no dump needed). A selected word
 //! that lifts to UNIMPL or to the wrong helper fails. A stlxp runs twice: with no exclusive monitor (it fails) and after
 //! an LDXP from its base (it stores). --keep keeps the C, its program and the trials (`./check < trials`).
@@ -42,8 +42,8 @@ const FORMS: [(u32, u32, &str, &str); 8] = [
     (0xBFE08000, 0x88208000, "stlxp", "(stx"),            // STLXP <Ws>, <Rt>, <Rt2>, [<Xn>]
 ];
 
-/// test_b3.py's [witchtime] AdvSIMD helpers
-const B3_HELPERS: [&str; 10] = [
+/// test_mr.py's [moonriver] AdvSIMD helpers
+const MR_HELPERS: [&str; 10] = [
     "v_i3x",
     "v_addp",
     "v_addsubl",
@@ -69,9 +69,9 @@ fn form(w: u32) -> Option<usize> {
         .filter(|&i| !(3..6).contains(&i) || w >> 19 & 0xf != 0)
 }
 
-/// a statement of test_b3.py's NEW: a [witchtime] helper, orr / bic (vector, immediate) or scalar addp
-fn b3_form(s: &str) -> bool {
-    B3_HELPERS.iter().any(|h| s.contains(h))
+/// a statement of test_mr.py's NEW: a [moonriver] helper, orr / bic (vector, immediate) or scalar addp
+fn mr_form(s: &str) -> bool {
+    MR_HELPERS.iter().any(|h| s.contains(h))
         || s.match_indices("c->v[").any(|(i, _)| {
             let r = &s[i + 5..];
             let t = r.trim_start_matches(|c: char| c.is_ascii_digit());
@@ -85,7 +85,7 @@ fn is_simd(w: u32) -> bool {
     w >> 25 & 7 == 7 || matches!(w >> 24 & 0x3f, 0x0c | 0x0d)
 }
 
-/// one-lane / replicate structure load-store with 2..4 registers (the [witchtime] part of the ldN decoder)
+/// one-lane / replicate structure load-store with 2..4 registers (the [moonriver] part of the ldN decoder)
 fn lane_ldst(w: u32) -> bool {
     w >> 24 & 0xbf == 0x0d && (w >> 21 & 1 != 0 || w >> 13 & 1 != 0)
 }
@@ -242,7 +242,7 @@ impl Emu<'_> {
     }
 }
 
-/// .text and .plt: the first PT_LOAD's file size (wtbuild's lifter::layout)
+/// .text and .plt: the first PT_LOAD's file size (mrbuild's lifter::layout)
 fn text_size(img: &[u8]) -> usize {
     let rd = |o: usize, n: usize| {
         img.get(o..o + n)
@@ -261,17 +261,17 @@ fn text_size(img: &[u8]) -> usize {
         .unwrap_or_else(|| die("ELF without PT_LOAD"))
 }
 
-/// `wtbuild lift-words`, at BASE + 0x1000000 in a function BASE..end as both Python checks lifted
-fn lift(wtbuild: &Path, words: &[u32], end: u64) -> Vec<String> {
-    let mut child = Command::new(wtbuild)
+/// `mrbuild lift-words`, at BASE + 0x1000000 in a function BASE..end as both Python checks lifted
+fn lift(mrbuild: &Path, words: &[u32], end: u64) -> Vec<String> {
+    let mut child = Command::new(mrbuild)
         .arg("lift-words")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .unwrap_or_else(|e| {
             die(format!(
-                "{}: {} (cargo build --release --manifest-path tools/wtbuild/Cargo.toml)",
-                wtbuild.display(),
+                "{}: {} (cargo build --release --manifest-path tools/mrbuild/Cargo.toml)",
+                mrbuild.display(),
                 e
             ))
         });
@@ -416,17 +416,17 @@ fn main() {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--main" | "--synthetic" | "--trials" | "--seed" | "--wtbuild" if i + 1 < args.len() => i += 2,
+            "--main" | "--synthetic" | "--trials" | "--seed" | "--mrbuild" if i + 1 < args.len() => i += 2,
             "--keep" => i += 1,
-            _ => die("usage: lifter-check [--main <main.elf> | --synthetic N] [--trials N] [--seed N] [--keep] [--wtbuild <path>]"),
+            _ => die("usage: lifter-check [--main <main.elf> | --synthetic N] [--trials N] [--seed N] [--keep] [--mrbuild <path>]"),
         }
     }
     let opt = |k: &str| args.iter().position(|a| a == k).map(|i| args[i + 1].as_str());
     let num = |k: &str, d: u64| opt(k).map_or(d, |s| s.parse().unwrap_or_else(|_| die(format!("{} {}: not a number", k, s))));
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
-    let wtbuild = opt("--wtbuild").map(PathBuf::from).unwrap_or_else(|| {
-        repo.join("tools/wtbuild/target/release")
-            .join(format!("wtbuild{}", std::env::consts::EXE_SUFFIX))
+    let mrbuild = opt("--mrbuild").map(PathBuf::from).unwrap_or_else(|| {
+        repo.join("tools/mrbuild/target/release")
+            .join(format!("mrbuild{}", std::env::consts::EXE_SUFFIX))
     });
     let trials = num("--trials", 300);
     let mut rng = Rng(num("--seed", 1));
@@ -444,7 +444,7 @@ fn main() {
         let n = n.parse().unwrap_or_else(|_| die(format!("--synthetic {}: not a number", n)));
         let ws = synthetic(n, &mut rng, &mut emu);
         end = BASE + 0x2000000;
-        for (w, s) in ws.iter().zip(lift(&wtbuild, &ws, end)) {
+        for (w, s) in ws.iter().zip(lift(&mrbuild, &ws, end)) {
             let f = FORMS[form(*w).unwrap()];
             if s.contains(f.3) {
                 names.push(f.2);
@@ -463,7 +463,7 @@ fn main() {
         let ws: BTreeSet<u32> = text.chunks_exact(4).map(|b| u32::from_le_bytes(b.try_into().unwrap())).collect();
         let ws: Vec<u32> = ws.into_iter().filter(|&w| form(w).is_some() || is_simd(w)).collect();
         end = BASE + size as u64;
-        for (w, s) in ws.iter().copied().zip(lift(&wtbuild, &ws, end)) {
+        for (w, s) in ws.iter().copied().zip(lift(&mrbuild, &ws, end)) {
             let name = match form(w) {
                 Some(f) if !s.contains(FORMS[f].3) => {
                     fails.push(format!("{:08x} {} lifts to: {}", w, FORMS[f].2, s));
@@ -474,7 +474,7 @@ fn main() {
                     fails.push(format!("{:08x} ldN / stN lane lifts to: {}", w, s));
                     continue;
                 }
-                None if !s.starts_with("UNIMPL") && (b3_form(&s) || lane_ldst(w)) => "[witchtime] AdvSIMD",
+                None if !s.starts_with("UNIMPL") && (mr_form(&s) || lane_ldst(w)) => "[moonriver] AdvSIMD",
                 None => continue,
             };
             names.push(name);
@@ -483,7 +483,7 @@ fn main() {
     }
     // (word, its code slot, statement): a stlxp also after an LDXP, so that it stores (CLREX alone makes it fail)
     let stlxp: Vec<u32> = words.iter().filter(|(w, _)| form(*w) == Some(7)).map(|(w, _)| ldxp_for(*w)).collect();
-    let mut pre = stlxp.iter().zip(lift(&wtbuild, &stlxp, end));
+    let mut pre = stlxp.iter().zip(lift(&mrbuild, &stlxp, end));
     let mut cases: Vec<(u32, u64, String)> = vec![];
     for (w, s) in words {
         cases.push((w, emu.place(NOP, w), s.clone()));
@@ -600,12 +600,12 @@ mod tests {
         assert_eq!(form(0x4f0c2420), Some(5));
         assert_eq!(form(0xc87f8112), Some(6));
         assert_eq!(form(0xc820be12), Some(7));
-        assert!(b3_form("v_addp(&c->v[2], &c->v[2], &c->v[3], 2, 0);"));
-        assert!(b3_form("{ c->v[0].d[0] &= ~ 0xf0000000f0000000ULL; c->v[0].d[1] = 0; }"));
-        assert!(b3_form("{ c->v[0].d[0] |= 0x0ULL; c->v[0].d[1] = 0; }"));
-        assert!(b3_form("{ uint64_t t = c->v[1].d[0] + c->v[1].d[1]; c->v[0].d[0] = t; c->v[0].d[1] = 0; }"));
-        assert!(!b3_form("{ c->v[0].d[0] = 0x4000000000000000ULL; c->v[0].d[1] = 0; }"));
-        assert!(!b3_form("c->v[].d[0] |= 1;"));
+        assert!(mr_form("v_addp(&c->v[2], &c->v[2], &c->v[3], 2, 0);"));
+        assert!(mr_form("{ c->v[0].d[0] &= ~ 0xf0000000f0000000ULL; c->v[0].d[1] = 0; }"));
+        assert!(mr_form("{ c->v[0].d[0] |= 0x0ULL; c->v[0].d[1] = 0; }"));
+        assert!(mr_form("{ uint64_t t = c->v[1].d[0] + c->v[1].d[1]; c->v[0].d[0] = t; c->v[0].d[1] = 0; }"));
+        assert!(!mr_form("{ c->v[0].d[0] = 0x4000000000000000ULL; c->v[0].d[1] = 0; }"));
+        assert!(!mr_form("c->v[].d[0] |= 1;"));
         // st4 {v0.s-v3.s}[0], [x9]; ld1 {v0.s}[0], [x9] has one register
         assert!(lane_ldst(0x0d20a120) && is_simd(0x0d20a120));
         assert!(!lane_ldst(0x0d408120));

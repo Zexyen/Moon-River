@@ -66,7 +66,7 @@ typedef struct {
      * per real pixel of the pass, 1.0 on a target that is not scaled), and the coordinates of a texelFetch from a 2D sampler
      * are mapped from the game's texel grid (the size table in c2) to the image's real one (textureSize). */
     int screen_scale;
-    /* [witchtime] tessellation evaluation stage: the GLSLC tessellation info of the NVN control section (+0x738 primitive mode,
+    /* [moonriver] tessellation evaluation stage: the GLSLC tessellation info of the NVN control section (+0x738 primitive mode,
      * +0x73c spacing, +0x740 point mode, +0x744 vertex order; OpenGL enums: GL_TRIANGLES / GL_QUADS / GL_ISOLINES, GL_EQUAL /
      * GL_FRACTIONAL_ODD / GL_FRACTIONAL_EVEN, GL_CW / GL_CCW). The control stage's output vertices come from its program header. */
     uint32_t tess_prim, tess_spacing, tess_point, tess_order;
@@ -78,7 +78,7 @@ typedef struct {
      * gl_Position kept in the output "vec4 mx_prev" (location MxOut.prev_loc), then as always. 0 = the text exactly as before. */
     uint32_t prev_cbufs;
     unsigned prev_base;
-    /* [witchtime] target 1, a stage other than fragment and compute, on a GPU without subgroup operations in that stage
+    /* [moonriver] target 1, a stage other than fragment and compute, on a GPU without subgroup operations in that stage
      * (Metal has them in fragment, compute and tessellation control stages only: MoltenVK refuses a tessellation
      * evaluation stage with a shuffle, and its draws were left out). The stage is then a warp of one lane, lane 0: a
      * shuffle gives the lane's own value, a vote its own predicate. 0 = the text exactly as before. */
@@ -95,7 +95,7 @@ typedef struct {
     uint32_t ssbos, ssbo_written;    /* game storage buffers referenced (LDG / STG) and whether the shader writes them */
     uint32_t images, images_read, images_written;      /* image units used (SULD / SUST) */
     uint16_t image_gl_format[8];     /* internal format each used image must be bound with (typed accesses name their own) */
-    uint8_t image_type[8];           /* [witchtime] SULD / SUST type of each used image: 0 1D, 1 buffer, 2 1D array, 3 2D, 4 2D array, 5 3D */
+    uint8_t image_type[8];           /* [moonriver] SULD / SUST type of each used image: 0 1D, 1 buffer, 2 1D array, 3 2D, 4 2D array, 5 3D */
     uint32_t int_dep;                /* which bits of int_attrs / int_tex influenced the code (vertex: attrs, fragment: textures) */
     int insns, blocks, uses_alpha;
     /* target 1: the samplers the text declares in set 1 (the back end binds a view of that type, or a dummy of that type) */
@@ -103,7 +103,7 @@ typedef struct {
     int nsmp;
     uint32_t prev_cbufs;             /* the buffers of MxIn.prev_cbufs the code reads; 0: no previous position (none read, the code stores, or no free location) */
     int prev_loc;                    /* location of mx_prev when prev_cbufs is not 0 */
-    int early_tests;                 /* fragment: 0 none; 1 early fragment tests asked for (WT_VK_EARLYZ); 2 asked for, and the code writes
+    int early_tests;                 /* fragment: 0 none; 1 early fragment tests asked for (MR_VK_EARLYZ); 2 asked for, and the code writes
                                      * frag0 / has the alpha test's discard: right only while neither alpha test nor alpha-to-coverage can discard */
 } MxOut;
 /* MxIn.force_out of a FRAGMENT stage (not used there otherwise): the variant for draws whose alpha test or alpha-to-coverage

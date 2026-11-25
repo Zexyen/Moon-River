@@ -9,7 +9,7 @@
 static const char *const g_language_codes[] = {"ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt", "ru",
                                                "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR"};
 
-/* name = display language ("en-GB", "de-DE") or WT_LANGUAGE; pick = one of the codes Bayonetta 2 takes, else en-US. */
+/* name = display language ("en-GB", "de-DE") or MR_LANGUAGE; pick = one of the codes Bayonetta 2 takes, else en-US. */
 static void language_pick(const char *name, char pick[16]) {
     static const char *const supported[] = {"ja", "en-US", "en-GB", "fr", "fr-CA", "de", "it", "es", "es-419", "zh-Hans", "zh-Hant", "ko", "nl", "ru"};
     const size_t n = sizeof supported / sizeof supported[0];

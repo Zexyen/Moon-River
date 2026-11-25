@@ -40,7 +40,7 @@ typedef struct {
     unsigned smem_words;
     int uses_smem;
     int uses_fcs, uses_tf;                    /* MxIn.screen_scale: gl_FragCoord.xy was scaled / a texelFetch was mapped */
-    int uses_sg;                              /* [witchtime] Vulkan: KHR subgroup functions (SHFL, VOTE, lane masks) */
+    int uses_sg;                              /* [moonriver] Vulkan: KHR subgroup functions (SHFL, VOTE, lane masks) */
     int nbar;                                 /* [issue 163] compute: BAR sites that leave the dispatcher (see MXOP_BAR) */
     int has_back, seq;                        /* [issue 92] a jump to an earlier word; seq: a stage with none that runs its blocks in order (see the blocks in mx_translate) */
     unsigned *be_t, *be_s; int nbe, capbe;    /* [issue 257] the jumps back: target and source word (analyze) */
@@ -50,9 +50,9 @@ typedef struct {
     uint8_t qidx[256]; int nqsrc;             /* [issue 66] register -> 1 + its snapshot bit (0: none) */
     unsigned qcase_pc[256]; uint32_t qcase_mask[256]; int nqcase; unsigned cur_case;      /* [issue 66] the snapshot bits each shuffle case needs */
     int uses_guard;                           /* [issue 26] a graphics stage with a step back: counts them (loop_guard) */
-    int uses_kill, uses_spun;                 /* [issue 26] the dispatcher's KIL flag / WT_VK_LOOPDEBUG's "limit hit" flag */
+    int uses_kill, uses_spun;                 /* [issue 26] the dispatcher's KIL flag / MR_VK_LOOPDEBUG's "limit hit" flag */
     int has_kil, writes_depth, writes_mask;   /* fragment: a KIL anywhere; gl_FragDepth / gl_SampleMask written (early fragment tests) */
-    uint64_t gatom;                           /* [witchtime] global atomics used: bit op + 11 * class (0 u32, 1 s32, 2 f32) */
+    uint64_t gatom;                           /* [moonriver] global atomics used: bit op + 11 * class (0 u32, 1 s32, 2 f32) */
     uint32_t images, images_read, images_written;
     uint16_t image_fmt[8]; uint8_t image_type[8];
     uint32_t *jt;                             /* static jump target of SYNC / BRK / CONT */
@@ -125,7 +125,7 @@ static int c0_unbacked(const Mx *e) { return e->in->target == 1 && e->in->stage 
  * quad mode early and counts it over the live lanes, so one helper lane shifts every lane after it in the wave. The pixel says where it is. */
 static const char *vk_lane(Mx *e) {
     if (e->in->stage == MX_FRAGMENT) return "((uint(gl_FragCoord.x) & 1u) | (uint(gl_FragCoord.y) & 1u) << 1)";
-    if (e->in->lone_lane) return "0u";         /* [witchtime] MxIn.lone_lane */
+    if (e->in->lone_lane) return "0u";         /* [moonriver] MxIn.lone_lane */
     e->uses_sg = 1;
     return "gl_SubgroupInvocationID";
 }
@@ -273,17 +273,17 @@ static const char *attr_in(Mx *e, unsigned a, const char *vx) {
 /* Round 17 (track V session 17): clip distances in the Vulkan text. OpenGL clips by gl_ClipDistance[i] only when
  * GL_CLIP_DISTANCEi is enabled, and nvn_gl.c never enables one; Vulkan clips by every element the vertex stage DECLARES,
  * and an element the code did not write on the path taken is undefined (the array is sized by the highest index written).
- * WT_VK_CLIP: 0 = as before (declared, not initialised); 1 = every element starts at 0.0 (on the plane = kept) and is
+ * MR_VK_CLIP: 0 = as before (declared, not initialised); 1 = every element starts at 0.0 (on the plane = kept) and is
  * clipped only by what the code writes; 2 = the writes go to a plain array and nothing is clipped, as in OpenGL. */
 #define MX_VK_CLIP_DEFAULT 0
 static int mx_vk_clip(const MxIn *in) {
     static int m = -1;
-    if (m < 0) { const char *s = getenv("WT_VK_CLIP"); m = s && s[0] ? atoi(s) : MX_VK_CLIP_DEFAULT; }
+    if (m < 0) { const char *s = getenv("MR_VK_CLIP"); m = s && s[0] ? atoi(s) : MX_VK_CLIP_DEFAULT; }
     return in->target == 1 ? m : 0;
 }
 static void attr_out(Mx *e, unsigned a, const char *v) {
     unsigned c = (a >> 2) & 3, st = (unsigned)e->in->stage;
-    if (st == MX_TESS_CONTROL) {                    /* [witchtime] the invocation's own output vertex (suyu: [gl_InvocationID]) */
+    if (st == MX_TESS_CONTROL) {                    /* [moonriver] the invocation's own output vertex (suyu: [gl_InvocationID]) */
         if (a >= 0x70 && a < 0x80) emit(e, " gl_out[gl_InvocationID].gl_Position[%u] = F(%s);", c, v);
         else if (a >= 0x80 && a < 0x280) { e->out_attr |= 1u << ((a - 0x80) >> 4); emit(e, " out_attr%u[gl_InvocationID][%u] = F(%s);", (a - 0x80) >> 4, c, v); }
         else fail(e, "attribute store", "tessellation control store to attribute 0x%x", a);
@@ -301,13 +301,13 @@ static void attr_out(Mx *e, unsigned a, const char *v) {
     else fail(e, "attribute store", "store to attribute 0x%x", a);
 }
 
-/* [witchtime] a video instruction's operand (suyu ExtractVideoOperandValue): width 0 / 1 = byte sel, 2 = short sel, 3 = the word */
+/* [moonriver] a video instruction's operand (suyu ExtractVideoOperandValue): width 0 / 1 = byte sel, 2 = short sel, 3 = the word */
 static const char *vid_operand(Mx *e, const char *v, unsigned w, unsigned sel, int sg) {
     if (w == 3) return v;
     unsigned bits = w == 2 ? 16 : 8;
     return sg ? S(e, "uint(bitfieldExtract(int(%s), %u, %u))", v, sel * bits, bits) : S(e, "bitfieldExtract(%s, %u, %u)", v, sel * bits, bits);
 }
-/* [witchtime] patch attribute p (address / 4; suyu's IR::Patch): 0..3 the outer tessellation levels, 4 / 5 the inner ones, 6 + 4k + c
+/* [moonriver] patch attribute p (address / 4; suyu's IR::Patch): 0..3 the outer tessellation levels, 4 / 5 the inner ones, 6 + 4k + c
  * component c of generic patch vector k (not supported). write: the lvalue (float) of the control stage, else the value as uint. */
 static const char *patch_attr(Mx *e, unsigned p, int write) {
     const char *lv;
@@ -377,7 +377,7 @@ static const char *tex_offset(Mx *e, unsigned t, const char *reg, int bits) {   
     return S(e, "ivec3(bitfieldExtract(int(%s), 0, %d), bitfieldExtract(int(%s), %d, %d), bitfieldExtract(int(%s), %d, %d))", reg, bits, reg, step, bits, reg, 2 * step, bits);
 }
 /* stores the components selected by mask into consecutive registers from rd */
-/* [witchtime] Vulkan GLSL wants texel offsets that are constant expressions; Maxwell's come from a register. Lowered for target 1:
+/* [moonriver] Vulkan GLSL wants texel offsets that are constant expressions; Maxwell's come from a register. Lowered for target 1:
  * an integer fetch adds the offset to its coordinates (exact); a filtered sample moves its coordinates by offset / size of
  * level lvl (exact at that level). shortcut: implicit-LOD samples use level 0 (wrong by a factor 2^lod on mip levels
  * above 0); fine for unmipped screen-space textures, upgrade with a textureQueryLod-based size if mipmapped ones show it. */
@@ -710,7 +710,7 @@ static const char *img_qualifier(uint16_t fmt, int *cls) {
     return NULL;
 }
 
-/* [witchtime] SULD / SUST with the image handle in a register: B3's shaders load that register from the bound image slot's
+/* [moonriver] SULD / SUST with the image handle in a register: B3's shaders load that register from the bound image slot's
  * handle word (MOV rN, c2[72 + 2k]) shortly before (all 799 such stores of B3's stages). The last instruction before pc,
  * in code order, that writes the register must be that load; the slot k, else -1 (the stage is not translated). */
 static int handle_slot(Mx *e, unsigned pc, unsigned reg) {
@@ -825,7 +825,7 @@ static void insn(Mx *e, unsigned pc, uint64_t i) {
         break;
     }
     case MXOP_VOTE:
-        if (e->in->target == 1) {               /* [witchtime] Vulkan: over the 32 lanes of the Maxwell warp inside a subgroup of 32 or 64 */
+        if (e->in->target == 1) {               /* [moonriver] Vulkan: over the 32 lanes of the Maxwell warp inside a subgroup of 32 or 64 */
             unsigned m = MXB(i, 48, 2);
             if (e->in->lone_lane) emit(e, "uint vb = %s ? 1u : 0u, va = 1u;", PR(e, MXB(i, 39, 3), (int)MXB(i, 42, 1)));
             else { e->uses_sg = 1;
@@ -841,7 +841,7 @@ static void insn(Mx *e, unsigned pc, uint64_t i) {
         if (MXB(i, 0, 8) != 255) emit(e, " %s = uint(ballotARB(vp));", DST);
         break;
         }
-    case MXOP_SHFL: {                           /* [witchtime] warp shuffle, as suyu's recompiler: b = lane (bits 20..24 or Rb), c = clamp (bits 0..4)
+    case MXOP_SHFL: {                           /* [moonriver] warp shuffle, as suyu's recompiler: b = lane (bits 20..24 or Rb), c = clamp (bits 0..4)
                                                  * and segment mask (bits 8..12), immediate (bits 34..46) or Rc; Pd (48..50) = the source lane is in range.
                                                  * The 32-lane warp is emulated inside a subgroup of 32 or 64 (lanes 0..31 / 32..63). A fragment stage shuffles
                                                  * inside its quad (the game's own operands are 0..3) from the snapshot mq_rN its dispatcher took at the loop
@@ -875,7 +875,7 @@ static void insn(Mx *e, unsigned pc, uint64_t i) {
         if (PD(e, MXB(i, 48, 3))) emit(e, " %s = ib;", PD(e, MXB(i, 48, 3)));
         break;
     }
-    case MXOP_FSWZADD: {                        /* [witchtime] a * la[q] + b * lb[q], q = the 2-bit field of the swizzle (bits 28..35) for this lane of
+    case MXOP_FSWZADD: {                        /* [moonriver] a * la[q] + b * lb[q], q = the 2-bit field of the swizzle (bits 28..35) for this lane of
                                                  * its quad (suyu's tables: la = 1 -1 1 0, lb = 1 1 -1 1). NDV (bit 38, "no divergence") is a hint: the
                                                  * same arithmetic. CC is not modelled. */
         if (MXB(i, 47, 1)) { fail(e, "FSWZADD", "FSWZADD with CC"); break; }
@@ -884,11 +884,11 @@ static void insn(Mx *e, unsigned pc, uint64_t i) {
         fres(e, i, S(e, "F(%s) * vec4(1.0, -1.0, 1.0, 0.0)[q] + F(%s) * vec4(1.0, 1.0, -1.0, 1.0)[q]", A8, R20), 0, 0);
         break;
     }
-    /* [witchtime] SAM / RAM: set / restore the active mask around hand-made quad derivatives (SHFL, FSWZADD, TEX). No-ops: the derivatives
+    /* [moonriver] SAM / RAM: set / restore the active mask around hand-made quad derivatives (SHFL, FSWZADD, TEX). No-ops: the derivatives
      * of a fragment stage's SHFL make the driver keep the helper lanes active (issue 66). */
     case MXOP_SAM: case MXOP_RAM:
         break;
-    case MXOP_VMNMX: {                          /* [witchtime] as suyu: d = op(min/max(a, b), c); a word-wide, selectors 2; op 0 MRG_16H 1 MRG_16L
+    case MXOP_VMNMX: {                          /* [moonriver] as suyu: d = op(min/max(a, b), c); a word-wide, selectors 2; op 0 MRG_16H 1 MRG_16L
                                                  * 2 MRG_8B0 3 MRG_8B2 4 ACC 5 MIN 6 MAX; b = Rb (bit 50) or a 16-bit immediate read as a byte */
         unsigned bsel = MXB(i, 28, 2), bw = MXB(i, 29, 2), asel = MXB(i, 36, 2), aw = MXB(i, 37, 2), vop = MXB(i, 51, 3);
         int bsg = (int)MXB(i, 49, 1), dsg = (int)MXB(i, 54, 1), breg = (int)MXB(i, 50, 1);
@@ -909,11 +909,11 @@ static void insn(Mx *e, unsigned pc, uint64_t i) {
         emit(e, "uint vl = %s; %s = vl;", res, DST);
         break;
     }
-    case MXOP_ISBERD:                           /* [witchtime] as suyu: the default form only, a move (the vertex index of ALD / AST) */
+    case MXOP_ISBERD:                           /* [moonriver] as suyu: the default form only, a move (the vertex index of ALD / AST) */
         if (MXB(i, 31, 1) || MXB(i, 32, 1) || MXB(i, 33, 2) || MXB(i, 47, 2)) { fail(e, "ISBERD", "ISBERD form %016llx", (unsigned long long)i); break; }
         emit(e, "%s = %s;", DST, A8);
         break;
-    case MXOP_VMAD: case MXOP_VSETP: {          /* [witchtime] as suyu: video operands (width 0/1 byte, 2 short, 3 word; immediates 16-bit, no selector
+    case MXOP_VMAD: case MXOP_VSETP: {          /* [moonriver] as suyu: video operands (width 0/1 byte, 2 short, 3 word; immediates 16-bit, no selector
                                                  * for VMAD). VMAD: d = a * b + c (no CC / SAT / scale / negation). VSETP: compare (its sign = b's), with
                                                  * the boolean op on Pa / !compare on Pb */
         unsigned asel = MXB(i, 36, 2), aw = MXB(i, 37, 2), bsel = MXB(i, 28, 2), bw = MXB(i, 29, 2);
@@ -1292,7 +1292,7 @@ static void insn(Mx *e, unsigned pc, uint64_t i) {
         unsigned a = MXB(i, 20, 10), n = MXB(i, 47, 2) + 1, rd = MXB(i, 0, 8);
         if (MXB(i, 8, 8) != 255) { fail(e, "ALD.indexed", "indexed attribute load"); break; }
         if (e->in->stage == MX_GEOMETRY) { fail(e, "ALD (vertex array)", "attribute load in stage %d", e->in->stage); break; }
-        if (tess_stage(e)) {                     /* [witchtime] as suyu: vertex register bits 39..46; .P (31) a patch attribute, .O (32) the
+        if (tess_stage(e)) {                     /* [moonriver] as suyu: vertex register bits 39..46; .P (31) a patch attribute, .O (32) the
                                                   * control stage's own outputs */
             const char *vx = X(e, MXB(i, 39, 8));
             for (unsigned k = 0; k < n && !e->fail; k++) {
@@ -1318,7 +1318,7 @@ static void insn(Mx *e, unsigned pc, uint64_t i) {
     case MXOP_AST: {
         unsigned a = MXB(i, 20, 10), n = MXB(i, 47, 2) + 1, rs = MXB(i, 0, 8);
         if (MXB(i, 8, 8) != 255) { fail(e, "AST.indexed", "indexed attribute store"); break; }
-        if (MXB(i, 31, 1)) {                     /* [witchtime] patch attribute (tessellation control) */
+        if (MXB(i, 31, 1)) {                     /* [moonriver] patch attribute (tessellation control) */
             if (e->in->stage != MX_TESS_CONTROL) { fail(e, "AST.P", "patch attribute store in stage %d", e->in->stage); break; }
             for (unsigned k = 0; k < n && !e->fail; k++) { const char *dst = patch_attr(e, (a >> 2) + k, 1); if (!e->fail) emit(e, " %s = F(%s);", dst, X(e, rs == 255 ? 255 : rs + k)); }
             break;
@@ -1342,7 +1342,7 @@ static void insn(Mx *e, unsigned pc, uint64_t i) {
         emit(e, " %s = U(f);", DST);
         break;
     }
-    case MXOP_BAR: {                            /* [witchtime] BAR.SYNC 0 with immediate zero operands (suyu: the only form it translates) */
+    case MXOP_BAR: {                            /* [moonriver] BAR.SYNC 0 with immediate zero operands (suyu: the only form it translates) */
         if ((i & 0x0000009b00000000ull) != 0x0000008000000000ull || !MXB(i, 43, 1) || !MXB(i, 44, 1) || MXB(i, 8, 8) || MXB(i, 20, 12) || e->in->stage != MX_COMPUTE) {
             fail(e, "BAR", "BAR form %016llx", (unsigned long long)i); break;
         }
@@ -1357,7 +1357,7 @@ static void insn(Mx *e, unsigned pc, uint64_t i) {
         else emit(e, "memoryBarrierShared(); memoryBarrierBuffer(); barrier();");
         break;
     }
-    case MXOP_ATOM: case MXOP_RED: {            /* [witchtime] global atomics (suyu's fields): ATOM d 0..7, b 20..27, size 49..51, op 52..55; RED b 0..7, size
+    case MXOP_ATOM: case MXOP_RED: {            /* [moonriver] global atomics (suyu's fields): ATOM d 0..7, b 20..27, size 49..51, op 52..55; RED b 0..7, size
                                                  * 20..22, op 23..25; address register 8..15 + signed offset 28..47. Ops 0 add 1 min 2 max 3 inc 4 dec 5 and 6 or
                                                  * 7 xor 8 exch 10 safe add; sizes 0 u32 1 s32 3 f32 (add only). Result = the old value. */
         int red = op == MXOP_RED;
@@ -1372,7 +1372,7 @@ static void insn(Mx *e, unsigned pc, uint64_t i) {
         if (rd != 255) emit(e, " %s = old;", D(e, rd));
         break;
     }
-    case MXOP_ATOMS: {                          /* [witchtime] shared-memory atomics: d 0..7, address register 8..15, b 20..27, size 28..29 (0 u32, 1 s32),
+    case MXOP_ATOMS: {                          /* [moonriver] shared-memory atomics: d 0..7, address register 8..15, b 20..27, size 28..29 (0 u32, 1 s32),
                                                  * word offset 30..51 (signed, x 4), op 52..55 as ATOM */
         unsigned sz = MXB(i, 28, 2), aop = MXB(i, 52, 4), rd = MXB(i, 0, 8), words = e->smem_words;
         int rel = (int)(MXB(i, 30, 22) << 10) >> 10;
@@ -1856,7 +1856,7 @@ int mx_translate(const MxIn *in, MxOut *out) {
 
     /* the code that ends the shader (EXIT): fragment outputs from the registers, alpha test, depth */
     static int ez_mode = -1;
-    if (ez_mode < 0) { const char *e_ez = getenv("WT_VK_EARLYZ"); ez_mode = e_ez ? atoi(e_ez) : 2; }
+    if (ez_mode < 0) { const char *e_ez = getenv("MR_VK_EARLYZ"); ez_mode = e_ez ? atoi(e_ez) : 2; }
     if (in->stage == MX_FRAGMENT) {
         uint32_t omap, flags;
         unsigned reg = 0;
@@ -1908,11 +1908,11 @@ int mx_translate(const MxIn *in, MxOut *out) {
     /* [issue 257] Fragment stages WITH jumps back run in order too (each looped stretch is a for (;;)), including stages
      * with quad SHFLs as long as NO SHFL or VOTE lies inside any loop stretch: the quad snapshots run between top-level
      * blocks (where all four lanes of every quad reconverge, as in issue 107), while the loops themselves run per-lane
-     * without wave-uniform subgroupAny / subgroupOr / switch overhead. WT_MX_LOOPS=0: dispatcher, =1: non-shuffle only,
+     * without wave-uniform subgroupAny / subgroupOr / switch overhead. MR_MX_LOOPS=0: dispatcher, =1: non-shuffle only,
      * =2 (default): also shuffle stages whose shuffles are all outside loops. */
     {
         static int loops_on = -1;
-        if (loops_on < 0) { const char *e_lp = getenv("WT_MX_LOOPS"); loops_on = e_lp ? atoi(e_lp) : 2; }
+        if (loops_on < 0) { const char *e_lp = getenv("MR_MX_LOOPS"); loops_on = e_lp ? atoi(e_lp) : 2; }
         if (loops_on && in->stage == MX_FRAGMENT && in->target == 1 && e->has_back && !vote && !e->fail) {
             if (!shfl) { e->loops = e->seq = 1; loop_regions(e); }
             else if (loops_on >= 2) {
@@ -1970,7 +1970,7 @@ int mx_translate(const MxIn *in, MxOut *out) {
         if (in->stage == MX_VERTEX || tess_stage(e)) e->out_attr |= in->force_out;      /* declared and set to (0, 0, 0, 1) below */
         const int vk = in->target == 1;
         const char *set0 = vk ? "set = 0, " : "", *set1 = vk ? "set = 1, " : "";
-        /* [witchtime] SignedZeroInfNanPreserve: without it AMD's Windows driver may assume no NaN / Inf and fold away the isnan and
+        /* [moonriver] SignedZeroInfNanPreserve: without it AMD's Windows driver may assume no NaN / Inf and fold away the isnan and
          * zero checks that model Maxwell (FMZ, saturate, NaN compares); an Inf / NaN pixel then reaches the bloom as a white blob */
         if (vk) emit(&h, "#version 460\n#extension GL_ARB_gpu_shader_int64 : enable\n#extension GL_EXT_texture_shadow_lod : enable\n"
                          "#extension GL_EXT_spirv_intrinsics : require\nspirv_execution_mode(extensions = [\"SPV_KHR_float_controls\"], capabilities = [4466], 4461, 32);\n");
@@ -1996,7 +1996,7 @@ int mx_translate(const MxIn *in, MxOut *out) {
         if (vk && in->stage == MX_FRAGMENT && in->screen_scale && e->uses_fcs) emit(&h, "layout(push_constant) uniform MXPC { uvec2 mx_alpha; float mx_point_size; float mx_fcs; float mx_fcs_y; };\n");      /* track O */
         else
         if (vk && (in->stage == MX_VERTEX || (in->stage == MX_FRAGMENT && e->uses_alpha))) emit(&h, "layout(push_constant) uniform MXPC { uvec2 mx_alpha; float mx_point_size; };\n");
-        /* [witchtime] issue 126: a fetch from an image of the game's own size (a pattern) at the game's pixel position masked by
+        /* [moonriver] issue 126: a fetch from an image of the game's own size (a pattern) at the game's pixel position masked by
          * that size is the screen-door dither: it takes the image's pixel instead, so the dots are the picture's pixels at any
          * scale. Draws that sample a screen image keep mx_fcs (resolve_sampler's own-pixels rule cannot reach them). */
         if (vk && e->uses_tf && in->stage == MX_FRAGMENT && in->screen_scale && e->uses_fcs) emit(&h, "ivec2 mx_tf(ivec2 p, ivec2 real, uint gw, uint gh) { ivec2 g = ivec2(int(gw), int(gh)), m = real - 1;\n"
@@ -2007,7 +2007,7 @@ int mx_translate(const MxIn *in, MxOut *out) {
         if (vk && in->stage == MX_VERTEX) emit(&h, "float mx_psize;\n");
         for (int k = 0; vk && k < e->nsmp; k++) emit(&h, "layout(set = 1, binding = %u) uniform %s mx_t%u_%s;\n", (unsigned)e->smp[k].binding, e->smp[k].type, (unsigned)e->smp[k].unit, e->smp[k].type);
         for (unsigned n = 0; n < 18; n++) if (e->cbufs >> n & 1) emit(&h, "layout(std430, %sbinding = %u) readonly buffer CB%u { uint c%u[]; };\n", set0, in->binding_base + n, n, n);
-        if (tess_stage(e)) {                    /* [witchtime] input arrays; the control stage's outputs are arrays too */
+        if (tess_stage(e)) {                    /* [moonriver] input arrays; the control stage's outputs are arrays too */
             if (in->stage == MX_TESS_CONTROL) emit(&h, "layout(vertices = %u) out;\n", in->code[0x0b] ? in->code[0x0b] : 1u);      /* program header: threads per input primitive */
             else emit(&h, "layout(%s, %s, %s%s) in;\n", in->tess_prim == 7 ? "quads" : in->tess_prim == 4 ? "triangles" : "isolines",
                       in->tess_spacing == 0x8e7b ? "fractional_odd_spacing" : in->tess_spacing == 0x8e7c ? "fractional_even_spacing" : "equal_spacing",
@@ -2027,11 +2027,11 @@ int mx_translate(const MxIn *in, MxOut *out) {
             if (nclip && mx_vk_clip(in) != 2) emit(&h, " float gl_ClipDistance[%d];", nclip);
             emit(&h, " };\n");
             if (nclip && mx_vk_clip(in) == 2) emit(&h, "float mx_clip[8];\n");      /* round 17: see mx_vk_clip */
-            {   /* The position is declared invariant (WT_VK_INVARIANT=0 off, =2 also precise): two programs that draw the same mesh,
+            {   /* The position is declared invariant (MR_VK_INVARIANT=0 off, =2 also precise): two programs that draw the same mesh,
                  * a depth pass and a colour pass with a depth test for equality, must give bit-equal depths. [issue 92] Without it,
                  * stages run as blocks in order (no dispatcher between the sums) lost a third of the goo's colour fragments on RADV. */
                 static int inv = -1;
-                if (inv < 0) inv = getenv("WT_VK_INVARIANT") ? atoi(getenv("WT_VK_INVARIANT")) : 1;
+                if (inv < 0) inv = getenv("MR_VK_INVARIANT") ? atoi(getenv("MR_VK_INVARIANT")) : 1;
                 if (vk && inv) emit(&h, "invariant gl_Position;\n");
                 if (vk && inv >= 2) emit(&h, "precise gl_Position;\n");
             }
@@ -2053,7 +2053,7 @@ int mx_translate(const MxIn *in, MxOut *out) {
                 emit(&h, "bool mx_alpha_ok(float a) { uint f = mx_alpha.x; float r = F(mx_alpha.y);\n"
                          "  return f == 0u || f >= 8u ? true : f == 1u ? false : f == 2u ? a < r : f == 3u ? a == r : f == 4u ? a <= r : f == 5u ? a > r : f == 6u ? a != r : a >= r; }\n");
             }
-            {   /* Early fragment tests for a stage that stores to memory (WT_VK_EARLYZ=0 turns them off). Without them a fragment stage
+            {   /* Early fragment tests for a stage that stores to memory (MR_VK_EARLYZ=0 turns them off). Without them a fragment stage
                  * with a store runs before the depth test, so every hidden fragment is shaded and stores. The depth prepass marks each
                  * object visible this way ("The render thread and the GPU overlap" in docs/STATUS.md): its most drawn stage stores
                  * 0xffff at the object's slot and nothing else, so every object counted as visible, and its fragments all stored to
@@ -2095,7 +2095,7 @@ int mx_translate(const MxIn *in, MxOut *out) {
             for (unsigned k = 0; k < 16; k++) if (e->ssbos >> k & 1) emit(&h, " case %uu: s%u[o] = v;%s break;\n", k + 1, k, in->track_writes ? S(e, " atomicOr(mx_wm, %uu);", 1u << k) : "");
             emit(&h, " } }\n");
         }
-        for (unsigned bit = 0; bit < 33; bit++) {               /* [witchtime] global atomics: one function per op and class, the atomic on the block itself */
+        for (unsigned bit = 0; bit < 33; bit++) {               /* [moonriver] global atomics: one function per op and class, the atomic on the block itself */
             if (!(e->gatom >> bit & 1)) continue;
             unsigned aop = bit % 11, cls = bit / 11;
             static const char *const direct[9] = {"atomicAdd", "atomicMin", "atomicMax", NULL, NULL, "atomicAnd", "atomicOr", "atomicXor", "atomicExchange"};

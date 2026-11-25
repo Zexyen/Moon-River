@@ -1,15 +1,15 @@
-# The launcher. Builds the game from the player's dump (wtbuild setup) and plays it in the same window
-# (build/libwitchtime.so). SDL3 + RmlUi on SDL's GPU API; Linux, Windows (llvm-mingw) and macOS (the game runs as
-# build/witch-time-game there, as on Windows).
+# The Moon River launcher. Builds the game from the player's dump (mrbuild setup) and plays it in the same window
+# (build/libmoonriver.so). SDL3 + RmlUi on SDL's GPU API; Linux, Windows (llvm-mingw) and macOS (the game runs as
+# build/moon-river-game there, as on Windows).
 #
 #     cmake -S launcher -B build/launcher -G Ninja -DCMAKE_BUILD_TYPE=Release
-#     cmake --build build/launcher                      -> build/recomp-launcher (Windows: build/recomp-launcher.exe, and
-#                                                          recomp-launcher.exe at the top, which starts it)
+#     cmake --build build/launcher                      -> build/moon-river-launcher (Windows: build/moon-river-launcher.exe,
+#                                                          and moon-river-launcher.exe at the top, which starts it)
 #
-# Needs the system's SDL3 (3.2 or newer) and FreeType. RmlUi is fetched at the pinned tag below, or taken from
+# Needs the system's SDL3 (3.4 or newer) and FreeType. RmlUi is fetched at the pinned tag below, or taken from
 # -DRMLUI_SOURCE_DIR=<folder> (an RmlUi checkout of that tag) when there is no network.
 cmake_minimum_required(VERSION 3.20)
-project(recomp_launcher LANGUAGES C CXX)
+project(moon_river_launcher LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -35,7 +35,7 @@ endif()
 FetchContent_MakeAvailable(rmlui)
 set(RMLUI_BACKENDS "${rmlui_SOURCE_DIR}/Backends")
 
-add_executable(recomp-launcher
+add_executable(moon-river-launcher
 	src/main.cpp
 	src/app.cpp
 	src/build_runner.cpp
@@ -47,38 +47,38 @@ add_executable(recomp-launcher
 	"${RMLUI_BACKENDS}/RmlUi_Platform_SDL.cpp"
 	"${RMLUI_BACKENDS}/RmlUi_Renderer_SDL_GPU.cpp")
 # src/shim: <SDL3_image/SDL_image.h> for RmlUi's SDL GPU renderer, without the SDL3_image library (ui_render.cpp
-# makes every picture the screens use; files are loaded as BMP)
-target_include_directories(recomp-launcher PRIVATE src src/shim "${RMLUI_BACKENDS}")
-set(WT_VERSION "dev build" CACHE STRING "The version shown in the launcher (release builds pass the tag, e.g. v0.1.0)")
-target_compile_definitions(recomp-launcher PRIVATE RMLUI_SDL_VERSION_MAJOR=3 WT_VERSION="${WT_VERSION}")
-target_link_libraries(recomp-launcher PRIVATE RmlUi::Core SDL3::SDL3 ${CMAKE_DL_LIBS})
-# beside witch-time-game, game.so and libwitchtime.so: the launcher finds the repository from its own place (build/..)
-# $ORIGIN: a release ships libSDL3.so.0 beside it, which libwitchtime.so (also $ORIGIN) then shares
+# draws procedural textures; PNG files are loaded through SDL3's built-in PNG loader)
+target_include_directories(moon-river-launcher PRIVATE src src/shim "${RMLUI_BACKENDS}")
+set(MR_VERSION "dev build" CACHE STRING "The version shown in the launcher (release builds pass the tag, e.g. v0.1.0)")
+target_compile_definitions(moon-river-launcher PRIVATE RMLUI_SDL_VERSION_MAJOR=3 MR_VERSION="${MR_VERSION}")
+target_link_libraries(moon-river-launcher PRIVATE RmlUi::Core SDL3::SDL3 ${CMAKE_DL_LIBS})
+# beside moon-river-game, game.so and libmoonriver.so: the launcher finds the repository from its own place (build/..)
+# $ORIGIN: a release ships libSDL3.so.0 beside it, which libmoonriver.so (also $ORIGIN) then shares
 if(APPLE)
-	set(WT_ORIGIN "@loader_path")
+	set(MR_ORIGIN "@loader_path")
 else()
-	set(WT_ORIGIN "$ORIGIN")
+	set(MR_ORIGIN "$ORIGIN")
 endif()
-set_target_properties(recomp-launcher PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../build"
-	BUILD_RPATH "${WT_ORIGIN}")
+set_target_properties(moon-river-launcher PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../build"
+	BUILD_RPATH "${MR_ORIGIN}")
 if(APPLE)
-	# build/Recomp.app: the same program in a bundle, for Finder and the Dock (macos/make_app.sh)
+	# build/Moon River.app: the same program in a bundle, for Finder and the Dock (macos/make_app.sh)
 	configure_file(macos/Info.plist.in "${CMAKE_CURRENT_BINARY_DIR}/Info.plist" @ONLY)
-	add_custom_command(TARGET recomp-launcher POST_BUILD
-		COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/macos/make_app.sh" "$<TARGET_FILE:recomp-launcher>" "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
-			"${CMAKE_CURRENT_SOURCE_DIR}/ui/img/icon.png" "${CMAKE_CURRENT_SOURCE_DIR}/../build/Recomp.app"
+	add_custom_command(TARGET moon-river-launcher POST_BUILD
+		COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/macos/make_app.sh" "$<TARGET_FILE:moon-river-launcher>" "${CMAKE_CURRENT_BINARY_DIR}/Info.plist"
+			"${CMAKE_CURRENT_SOURCE_DIR}/ui/img/icon.png" "${CMAKE_CURRENT_SOURCE_DIR}/../build/Moon River.app"
 		VERBATIM)
 endif()
 if(WIN32)
 	# a window program (no console), with UTF-8 as its code page (win32/launcher.rc); C++ runtime linked in, so that it
 	# needs nothing beside it but SDL3.dll
-	target_sources(recomp-launcher PRIVATE win32/launcher.rc)
-	set_target_properties(recomp-launcher PROPERTIES WIN32_EXECUTABLE ON)
-	target_link_options(recomp-launcher PRIVATE -static)
-	target_link_libraries(recomp-launcher PRIVATE ole32 uuid)    # the desktop shortcut (IShellLink, platform.cpp)
-	# recomp-launcher.exe at the top of a release: starts build/recomp-launcher.exe (Windows has no symbolic link to ship there)
-	add_executable(recomp-launcher-start WIN32 win32/start.c win32/launcher.rc)
-	target_compile_options(recomp-launcher-start PRIVATE -municode)
-	target_link_options(recomp-launcher-start PRIVATE -static -municode)
-	set_target_properties(recomp-launcher-start PROPERTIES OUTPUT_NAME recomp-launcher RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
+	target_sources(moon-river-launcher PRIVATE win32/launcher.rc)
+	set_target_properties(moon-river-launcher PROPERTIES WIN32_EXECUTABLE ON)
+	target_link_options(moon-river-launcher PRIVATE -static)
+	target_link_libraries(moon-river-launcher PRIVATE ole32 uuid)    # the desktop shortcut (IShellLink, platform.cpp)
+	# moon-river-launcher.exe at the top of a release: starts build/moon-river-launcher.exe (Windows has no symbolic link to ship there)
+	add_executable(moon-river-launcher-start WIN32 win32/start.c win32/launcher.rc)
+	target_compile_options(moon-river-launcher-start PRIVATE -municode)
+	target_link_options(moon-river-launcher-start PRIVATE -static -municode)
+	set_target_properties(moon-river-launcher-start PROPERTIES OUTPUT_NAME moon-river-launcher RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/..")
 endif()

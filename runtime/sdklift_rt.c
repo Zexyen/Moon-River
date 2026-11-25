@@ -1,4 +1,4 @@
-/* Loader and glue for the code lifted out of the real SDK module (sdklift_gen.c, made by tools/wtbuild/src/sdklift.rs).
+/* Loader and glue for the code lifted out of the real SDK module (sdklift_gen.c, made by tools/mrbuild/src/sdklift.rs).
  *
  * The SDK image (binaries\13.0.4\sdk.elf, the user's own dump converted with nso2elf) is mapped at
  * SDK_BASE with its three PT_LOAD segments and relocated like the game image, so the lifted functions
@@ -37,7 +37,7 @@ static void die(const char *fmt, ...) {
 
 static int load_image(void) {
     char path[1024];
-    const char *env = getenv("WT_SDK_ELF");
+    const char *env = getenv("MR_SDK_ELF");
     const char *g_elf = __argc > 1 ? __argv[1] : NULL;       /* same argument boot.c uses for main.elf */
     if (env && env[0]) snprintf(path, sizeof path, "%s", env);
     else {
@@ -47,7 +47,7 @@ static int load_image(void) {
         snprintf(slash ? slash + 1 : path, 16, "sdk.elf");
     }
     FILE *f = fopen(path, "rb");
-    if (!f) { printf("sdklift: cannot open %s (set WT_SDK_ELF): lifted SDK functions are unavailable\n", path); return 0; }
+    if (!f) { printf("sdklift: cannot open %s (set MR_SDK_ELF): lifted SDK functions are unavailable\n", path); return 0; }
     fseek(f, 0, SEEK_END);
     g_file_size = (size_t)ftell(f);
     fseek(f, 0, SEEK_SET);
@@ -152,7 +152,7 @@ void sdk_dispatch(Ctx *c, uint64_t addr) {
             uint64_t off;
             const char *n = sdk_name_of(addr, &off);
             printf("\nsdklift: lifted SDK code (f_%llx) calls SDK address %llx (%s+0x%llx) through a pointer, and that function was not lifted.\n"
-                   "Add `addr %llx` to sdklift_roots.txt and run `wtbuild setup --from tables`.\n",
+                   "Add `addr %llx` to sdklift_roots.txt and run `mrbuild setup --from tables`.\n",
                    (unsigned long long)c->fn, (unsigned long long)(addr - SDK_BASE), n, (unsigned long long)off, (unsigned long long)(addr - SDK_BASE));
             guest_trap("indirect call to an SDK function that was not lifted", addr);
         }

@@ -1,4 +1,4 @@
-/* [witchtime] issues 118 / 119: AMD FSR 3.1.4 temporal upscaling as native anti-aliasing (render size = output size).
+/* [moonriver] issues 118 / 119: AMD FSR 3.1.4 temporal upscaling as native anti-aliasing (render size = output size).
  * Included at the end of nvn_vk.c (after nvn_vk_draw.c): one translation unit with the Vulkan back end.
  *
  * The engine has no motion vectors it draws (its velocity passes are loaded but never bound: Witch Time's docs/STATUS.md "FSR 3.1"),
@@ -401,7 +401,7 @@ static void fsr_dispatch(int p, uint32_t gx, uint32_t gy) {
     }
     vkCmdBindPipeline(R.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, F.pipe[p]);
     vkCmdPushDescriptorSetKHR(R.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, F.pl[p], 0, (uint32_t)n, w);
-    ckpt(3, NULL, NULL, NULL);                     /* WT_VK_CHECKPOINTS: the dump names FSR's pass (hb[0]) */
+    ckpt(3, NULL, NULL, NULL);                     /* MR_VK_CHECKPOINTS: the dump names FSR's pass (hb[0]) */
     if (g_ck_on && g_ckn) g_ck[(g_ckn - 1) % CK_N].hb[0] = (uint64_t)p;
     vkCmdDispatch(R.cmd, gx ? gx : 1, gy ? gy : 1, 1);
     ckpt(2, NULL, NULL, NULL);
@@ -440,7 +440,7 @@ static void fsr_run(Tex *col, Tex *depth, int fx) {
     if (F.ok == 0 && !fsr_setup()) { if (rs_render_scale() != rs_scale()) rs_apply(); return; }      /* a quality mode without FSR: the scene back at the picture's scale (fsr_ratio is 1 now) */
     pass_end();
     cmd_begin();
-    pt_mark(w, h, 0, 0x118, 0, 0, 1);              /* WT_VK_PASSTIME: FSR (and its copy) as a kind of its own, "format 0x118" */
+    pt_mark(w, h, 0, 0x118, 0, 0, 1);              /* MR_VK_PASSTIME: FSR (and its copy) as a kind of its own, "format 0x118" */
     fsr_barrier(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT);      /* FI_OUT: an earlier tonemap's read, fsr_up_view's blit */
     if (w != F.w || h != F.h || uw != F.uw || uh != F.uh || !F.img[FI_OUT].vt || (!F.blit && F.img[FI_OUT].vt->fmt != vc->fmt)) fsr_resize(w, h, uw, uh, vc->fmt);
     F.col = col;
@@ -597,9 +597,9 @@ static VkImageView fsr_dither_view(int s, unsigned u, Tex *t, VTex *vt, const Vi
         g_fd[i].t = t;
         printf("nvn_vk_fsr: dither pattern %d: a 64 x 64 texture (format 0x%x) read at unit 14 by the depth pre-pass\n", i + 1, t->b.format);
     }
-    {   /* TEST ONLY: WT_FSR_DITHER=0 keeps the game's fixed pattern; =alt: fixed in every other 30 frames (an A/B in one run) */
+    {   /* TEST ONLY: MR_FSR_DITHER=0 keeps the game's fixed pattern; =alt: fixed in every other 30 frames (an A/B in one run) */
         static int mode = -1;
-        if (mode < 0) { const char *e = getenv("WT_FSR_DITHER"); mode = !e ? 1 : !strcmp(e, "alt") ? 2 : atoi(e) != 0; }
+        if (mode < 0) { const char *e = getenv("MR_FSR_DITHER"); mode = !e ? 1 : !strcmp(e, "alt") ? 2 : atoi(e) != 0; }
         if (game_fsr_w <= 0 || !fsr_want() || !mode || (mode == 2 && (F.frame / 30) % 2)) return NULL;
     }
     EView e;
@@ -712,7 +712,7 @@ static void fsr_draw(VStage *fs) {
  * whose vertex stage reads constant buffer 14, the object's bone palette or instance records: the block is kept for the next
  * frame. fsr_mv_last gives last frame's bytes of the same palette: the game library names the slot it was in
  * (game_mv_pairs, game_shim_eh.c h_palette_upload). The velocity pass (step 3, below) draws with them.
- * TEST ONLY, WT_FSR_MVLOG=1: every 300 frames, how many blocks of the frame that ended have last frame's bytes, and how many
+ * TEST ONLY, MR_FSR_MVLOG=1: every 300 frames, how many blocks of the frame that ended have last frame's bytes, and how many
  * pre-pass draws take a vertex stream from a compute buffer or read a storage buffer in the vertex stage (no such draw has a
  * previous position from step 1 alone). */
 typedef struct { volatile uint64_t dst, prev; } GameMvPair;
@@ -739,7 +739,7 @@ static const uint8_t *fsr_mv_last(uint64_t addr, uint32_t size, int *why) {     
  * or read a storage buffer in the vertex stage, draws fed by a compute buffer, an object in its first frame.
  * A stage's pipeline is made by a thread of its own from the stage's first draw (40 ms each on a cold cache, measured: on the
  * render thread that was a hitch a stage); until it is ready the stage's draws keep the camera's vector.
- * WT_FSR_MV=0: no velocity pass. */
+ * MR_FSR_MV=0: no velocity pass. */
 typedef struct { uint32_t id; VkFormat dfmt; volatile LONG state; VkPipeline p; uint32_t prev; } MvPipe;      /* state: 0 free, 2 being made, 1 ready, -1 this stage has no previous position; prev: MxOut.prev_cbufs */
 typedef struct MvJob { struct MvJob *next; MvPipe *mp; uint32_t key[4], cdata_size; int code_len; uint8_t data[1]; } MvJob;      /* data: a copy of the code, then of its constants (the program may go) */
 static MvJob *g_mvj_head, **g_mvj_tail = &g_mvj_head;
@@ -756,7 +756,7 @@ static MvPipe g_mvp[4096];                      /* shortcut: never emptied; a se
 static VkPipelineLayout g_mv_pl; static VkDescriptorSetLayout g_mv_dl; static VkShaderModule g_mv_fs[32];
 static MvCam g_mvcam[2];                           /* the pre-pass's camera (c3) of this frame and the last, by the frame's parity */
 static struct { MvDraw *d; int n, cap, open; Tex *depth; VkImageView dview; LONG64 frame; int pipes, bad; double pipe_ms; } g_mvd;      /* pipes, bad, pipe_ms: the pipeline thread's counts, for the log */
-static int fsr_mv_on(void) { static int on = -1; if (on < 0) { const char *e = getenv("WT_FSR_MV"); on = !(e && !atoi(e)) && D.has_vids && fmt_supported(VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT); } return on; }
+static int fsr_mv_on(void) { static int on = -1; if (on < 0) { const char *e = getenv("MR_FSR_MV"); on = !(e && !atoi(e)) && D.has_vids && fmt_supported(VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT); } return on; }
 
 /* the pipeline thread: one stage's velocity pipeline */
 static void fsr_mv_build(MvJob *j) {
@@ -871,14 +871,14 @@ static int fsr_mv_prepare(VStage *vs, int tess, MvPrep *o) {
     if (R.ncol || !(vs->cbufs >> 14 & 1) || !u->addr || u->size > MV_MAX_BLOCK || !fsr_want() || !fsr_scene_depth()) return 0;
     int fresh = mv_note(&g_mv, u->addr, (uint32_t)u->size, P(u->addr)), why;
     const uint8_t *last = fsr_mv_last(u->addr, (uint32_t)u->size, &why);
-    if (g_mvlog.on < 0) g_mvlog.on = getenv("WT_FSR_MVLOG") != NULL;
+    if (g_mvlog.on < 0) g_mvlog.on = getenv("MR_FSR_MVLOG") != NULL;
     if (g_mvlog.on) { g_mvlog.draws++; if (fresh) { g_mvlog.blocks++; if (last) { g_mvlog.paired++; g_mvlog.moved += memcmp(last, P(u->addr), u->size) != 0; } else if (why == 1) g_mvlog.unnamed++; else g_mvlog.gone++; } }
     if (!last || tess || !fsr_mv_on() || !u3->addr || !u3->size || u3->size > sizeof g_mvcam[0].b) return 0;
     MvCam *cam = &g_mvcam[F.frame & 1], *pcam = &g_mvcam[~F.frame & 1];
     if (cam->frame != F.frame || !cam->n) { cam->frame = F.frame; cam->addr = u3->addr; cam->n = (uint32_t)u3->size; memcpy(cam->b, P(u3->addr), u3->size); }      /* the pre-pass's first camera is the scene's */
     if (cam->addr != u3->addr || pcam->frame != F.frame - 1 || pcam->n < u3->size || !R.depth.tex->vk) return 0;
-    {   static int all = -1;                       /* TEST ONLY: WT_FSR_MV_ALL=1 draws the ones that did not move too: their vectors must equal the camera's */
-        if (all < 0) all = getenv("WT_FSR_MV_ALL") != NULL;
+    {   static int all = -1;                       /* TEST ONLY: MR_FSR_MV_ALL=1 draws the ones that did not move too: their vectors must equal the camera's */
+        if (all < 0) all = getenv("MR_FSR_MV_ALL") != NULL;
         if (!all && !memcmp(last, P(u->addr), u->size)) return 0; }      /* it did not move: the camera's vector is exact */
     MvPipe *mp = fsr_mv_pipe(vs, ((VTex *)R.depth.tex->vk)->fmt);
     if (!mp) return 0;
@@ -974,11 +974,11 @@ static int fsr_mv_pass(Tex *depth, VTex *vd, int w, int h) {
     g_mvlog.replayed += drawn;
     return drawn;
 }
-/* TEST ONLY (WT_FSR_MVDUMP=<frame>): FI_MV of that frame before and after the velocity pass, raw RG16F rows, as
- * mv_<frame>_<0|1>_<width>x<height>.bin in WT_SHOT_DIR (or here). One GPU wait. */
+/* TEST ONLY (MR_FSR_MVDUMP=<frame>): FI_MV of that frame before and after the velocity pass, raw RG16F rows, as
+ * mv_<frame>_<0|1>_<width>x<height>.bin in MR_SHOT_DIR (or here). One GPU wait. */
 static void fsr_mv_dump(Tex *depth, VTex *vd, int w, int h) {
     static LONG64 at = -2;
-    if (at == -2) at = getenv("WT_FSR_MVDUMP") ? atoll(getenv("WT_FSR_MVDUMP")) : -1;
+    if (at == -2) at = getenv("MR_FSR_MVDUMP") ? atoll(getenv("MR_FSR_MVDUMP")) : -1;
     if (F.frame != at) { fsr_mv_pass(depth, vd, w, h); return; }
     VMem m[2]; VkBuffer b[2];
     VkBufferImageCopy c; memset(&c, 0, sizeof c);
@@ -993,7 +993,7 @@ static void fsr_mv_dump(Tex *depth, VTex *vd, int w, int h) {
     fsr_barrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
     cmd_wait_all();
     for (int k = 0; k < 2; k++) {
-        char path[MAX_PATH]; snprintf(path, sizeof path, "%s/mv_%lld_%d_%dx%d.bin", getenv("WT_SHOT_DIR") ? getenv("WT_SHOT_DIR") : ".", (long long)F.frame, k, w, h);
+        char path[MAX_PATH]; snprintf(path, sizeof path, "%s/mv_%lld_%d_%dx%d.bin", getenv("MR_SHOT_DIR") ? getenv("MR_SHOT_DIR") : ".", (long long)F.frame, k, w, h);
         FILE *f = fopen(path, "wb");
         if (f) { fwrite(m[k].map, 4, (size_t)w * h, f); fclose(f); }
         vkDestroyBuffer(V.device, b[k], NULL); vmem_free(m[k]);

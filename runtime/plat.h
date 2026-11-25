@@ -440,8 +440,8 @@ static inline void Sleep(DWORD ms) {
     while (nanosleep(&ts, &ts) && errno == EINTR) {}
 }
 #define SwitchToThread() (sched_yield(), 1)
-/* like ExitProcess: other threads are not unwound, no atexit. [witchtime] plat_exit_hook (plat_posix.c) runs first when
- * a host has set it: the Witch Time launcher, which runs the game in its own process and window (launcher/) */
+/* like ExitProcess: other threads are not unwound, no atexit. [moonriver] plat_exit_hook (plat_posix.c) runs first when
+ * a host has set it: the Moon River launcher, which runs the game in its own process and window (launcher/) */
 __attribute__((noreturn)) void plat_exit_process(int code);
 #define ExitProcess(code) plat_exit_process((int)(code))
 

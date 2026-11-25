@@ -22,10 +22,10 @@ static void put(const char *name, const void *p, size_t n) {
     fwrite(p, 1, n, f); fclose(f);
 }
 static void index_of(uint32_t version, const TexPackEntry *e, uint32_t n) {
-    uint8_t b[4096] = "WTXI";
+    uint8_t b[4096] = "MRXI";
     uint32_t h[3] = {version, 1, n};
-    memcpy(b + 4, h, 12); memcpy(b + 16, "s.wtx", 6); memcpy(b + 48, e, n * sizeof *e);
-    put("index.wtx", b, 48 + n * sizeof *e);
+    memcpy(b + 4, h, 12); memcpy(b + 16, "s.mrx", 6); memcpy(b + 48, e, n * sizeof *e);
+    put("index.mrx", b, 48 + n * sizeof *e);
 }
 int main(void) {
     static const uint8_t lz4[] = {63, 97, 98, 99, 3, 0, 11, 96, 97, 98, 99, 120, 121, 122};      /* what lz4_flex makes of raw */
@@ -45,7 +45,7 @@ int main(void) {
     memset(shard, 0xee, sizeof shard);
     memcpy(shard + 3, lz4, sizeof lz4);
     memcpy(shard + 3 + sizeof lz4, "0123456789abcdef", 16);
-    put("s.wtx", shard, 3 + sizeof lz4 + 16);
+    put("s.mrx", shard, 3 + sizeof lz4 + 16);
 
     index_of(TEX_PACK_VERSION + 1, e, 2);
     CHECK(tex_pack_open(DIR_) == 0);                    /* another version: no pack */
@@ -68,22 +68,22 @@ int main(void) {
         for (int v = 0; v < 256; v += 17) {
             memcpy(dmg, lz4, sizeof lz4); dmg[i] = (uint8_t)v;
             memcpy(shard + 3, dmg, sizeof lz4);
-            put("s.wtx", shard, 3 + sizeof lz4 + 16);
+            put("s.mrx", shard, 3 + sizeof lz4 + 16);
             memset(out, 0, sizeof out);
             tex_pack_read(&d, out);                     /* either answer: the bytes after e->raw stay */
             for (size_t k = d.raw; k < sizeof out; k++) CHECK(out[k] == 0);
         }
     memcpy(shard + 3, lz4, sizeof lz4);
     shard[3 + 4] = 200;                                 /* offset 200 with 3 bytes out */
-    put("s.wtx", shard, 3 + sizeof lz4 + 16);
+    put("s.mrx", shard, 3 + sizeof lz4 + 16);
     CHECK(!tex_pack_read(&d, out));
-    put("s.wtx", shard, 3 + 2);                         /* cut short */
+    put("s.mrx", shard, 3 + 2);                         /* cut short */
     CHECK(!tex_pack_read(&d, out));
-    remove("tex_pack_test_dir/s.wtx");
+    remove("tex_pack_test_dir/s.mrx");
     CHECK(!tex_pack_read(&d, out));                     /* gone */
     d.shard = 9;
     CHECK(!tex_pack_read(&d, out));
-    remove("tex_pack_test_dir/index.wtx");
+    remove("tex_pack_test_dir/index.mrx");
     (void)remove(DIR_);
     printf("%s\n", bad ? "FAIL" : "ok");
     return bad != 0;

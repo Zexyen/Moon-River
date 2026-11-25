@@ -38,7 +38,7 @@ typedef struct {
     int mouse_cam, mouse_inv;           /* [Recomps#1] [keyboard] mouse_camera (default on), mouse_invert_y */
     float mouse_sens;                   /* [Recomps#1] [keyboard] mouse_sensitivity (default 1.0) */
     int prompts;                        /* [Recomps#1] [general] button_prompts: 0 auto, 1 switch, 2 playstation, 3 xbox */
-    int menu_swap;                      /* [witchtime] [general] swap_confirm */
+    int menu_swap;                      /* [moonriver] [general] swap_confirm */
     int input;                          /* [Recomps#1] [general] input: 0 both, 1 keyboard (pads unused), 2 controller (keyboard and mouse unused) */
 } Cfg;
 typedef struct {
@@ -47,7 +47,7 @@ typedef struct {
     int slot, wireless, dropped, nbtn, naxes, nhats, gtype, has_accel, has_gyro, virt;
     char guid[40], name[80];
     Uint16 rl, rh; ULONGLONG rsent;
-    int armed;                          /* [witchtime] stick axes (bit i = LX LY RX RY) of an unmapped joystick seen near the centre */
+    int armed;                          /* [moonriver] stick axes (bit i = LX LY RX RY) of an unmapped joystick seen near the centre */
 } Dev;
 
 static const char *const g_pro[16] = {"A", "B", "X", "Y", "STICK_L", "STICK_R", "L", "R", "ZL", "ZR", "PLUS", "MINUS", "LEFT", "UP", "RIGHT", "DOWN"};
@@ -137,8 +137,8 @@ static const char *const g_default_ini =
 "; controllers.ini: pads and keyboard for the native build (read by nnpad_sdl.c; reloaded within a second of being saved).\r\n"
 "; Lines starting with ; or # are comments. Names are not case sensitive. Delete this file to get it written again.\r\n"
 ";\r\n"
-"; Find out what SDL sees:       witch-time-game --pad-test       (devices, GUIDs, live button names)\r\n"
-"; Map a pad by pressing keys:   witch-time-game --pad-map 1      (player 1; writes a [device <GUID>] section below)\r\n"
+"; Find out what SDL sees:       moon-river-game --pad-test       (devices, GUIDs, live button names)\r\n"
+"; Map a pad by pressing keys:   moon-river-game --pad-map 1      (player 1; writes a [device <GUID>] section below)\r\n"
 ";\r\n"
 "; Pro Controller buttons: A B X Y STICK_L STICK_R L R ZL ZR PLUS MINUS LEFT UP RIGHT DOWN\r\n"
 "; Sources on a pad SDL has a mapping for: south east west north back guide start leftstick rightstick leftshoulder\r\n"
@@ -181,7 +181,7 @@ static const char *const g_default_ini =
 "[keyboard]\r\n"
 "; auto = player 1, together with player 1's pad (a one-player game reads only player 1); 1..8 = that\r\n"
 "; player (merged with the pad of that player); none = no keyboard.\r\n"
-"; The environment variable WT_KEYBOARD_PLAYER (0 = none, 1..8) overrides this line. The keyboard counts only while the game window has the focus.\r\n"
+"; The environment variable MR_KEYBOARD_PLAYER (0 = none, 1..8) overrides this line. The keyboard counts only while the game window has the focus.\r\n"
 "player = auto\r\n"
 "; Keys: a letter or digit, LEFT UP RIGHT DOWN ENTER BACKSPACE SPACE TAB ESC SHIFT CTRL ALT LSHIFT RSHIFT LCTRL RCTRL LALT RALT F1..F12,\r\n"
 "; NUM0..NUM9, MOUSE1..MOUSE5 (left, right, middle, back, forward), or 0x<virtual key code>; none = unbound. Two keys for one\r\n"
@@ -260,7 +260,7 @@ static int parse_vk1(const char *t) {
     if (b[1] == 0) { char ch = b[0]; if (ch >= 'a' && ch <= 'z') ch -= 32; return ch; }
     if (!_stricmp(b, "LEFT")) return VK_LEFT; if (!_stricmp(b, "UP")) return VK_UP;
     if (!_stricmp(b, "RIGHT")) return VK_RIGHT; if (!_stricmp(b, "DOWN")) return VK_DOWN;
-    if (!_stricmp(b, "ENTER") || !_stricmp(b, "RETURN")) return VK_RETURN; if (!_stricmp(b, "BACKSPACE")) return VK_BACK;      /* [witchtime] RETURN, ESCAPE: SDL's names */
+    if (!_stricmp(b, "ENTER") || !_stricmp(b, "RETURN")) return VK_RETURN; if (!_stricmp(b, "BACKSPACE")) return VK_BACK;      /* [moonriver] RETURN, ESCAPE: SDL's names */
     if (!_stricmp(b, "SPACE")) return VK_SPACE; if (!_stricmp(b, "TAB")) return VK_TAB; if (!_stricmp(b, "ESC") || !_stricmp(b, "ESCAPE")) return VK_ESCAPE;
     if (!_stricmp(b, "SHIFT")) return VK_SHIFT; if (!_stricmp(b, "CTRL")) return VK_CONTROL; if (!_stricmp(b, "ALT")) return VK_MENU;
     /* [Recomps#1] the mouse buttons and the left / right modifier keys */
@@ -378,11 +378,11 @@ static ULONGLONG file_mtime(const char *path) {
     return ((ULONGLONG)a.ftLastWriteTime.dwHighDateTime << 32) | a.ftLastWriteTime.dwLowDateTime;
 }
 static void cfg_path(char *out) {
-    const char *e = getenv("WT_CONFIG");
+    const char *e = getenv("MR_CONFIG");
     if (e && e[0]) { snprintf(out, MAX_PATH, "%s", e); return; }
     char exe[MAX_PATH], tmp[MAX_PATH];
     GetModuleFileNameA(NULL, exe, MAX_PATH);
-    char *s = strrchr(exe, '\\'), *s2 = strrchr(exe, '/');      /* [witchtime] '/' on Linux too, as gfx_options.c opt_path */
+    char *s = strrchr(exe, '\\'), *s2 = strrchr(exe, '/');      /* [moonriver] '/' on Linux too, as gfx_options.c opt_path */
     if (s2 > s) s = s2;
     if (s) *s = 0;
     snprintf(tmp, sizeof tmp, "%s\\..\\config\\controllers.ini", exe);
@@ -409,11 +409,11 @@ static void cfg_load(int first) {                 /* lock held */
     if (text) { cfg_parse(&n, text); free(text); }
     strcpy(n.path, g_cfg.path);
     n.mtime = mt;
-    for (int i = 0; i < KB_N; i++) for (int j = i + 1; j < KB_N; j++) for (int k = 0; k < 4; k++) {     /* [witchtime] a key that does two things */
+    for (int i = 0; i < KB_N; i++) for (int j = i + 1; j < KB_N; j++) for (int k = 0; k < 4; k++) {     /* [moonriver] a key that does two things */
         int x = n.kb_vk[i] >> (k & 1) * 8 & 0xff;
         if (x && x == (n.kb_vk[j] >> (k >> 1) * 8 & 0xff)) say("nn::pad: [keyboard] key 0x%02x is bound to both %s and %s\n", x, g_kbn[i], g_kbn[j]);
     }
-    {   const char *l = getenv("WT_PAD_LAYOUT");
+    {   const char *l = getenv("MR_PAD_LAYOUT");
         if (l && l[0]) n.def.layout = !_stricmp(l, "label") || !_stricmp(l, "labels") ? 1 : 0; }
     g_cfg = n;
 }
@@ -664,7 +664,7 @@ static void dev_state(Dev *d, NnPadState *o) {            /* lock held */
     for (int i = 0; i < 4; i++) {
         Src s;
         v[i] = stick_src(d, i, &s) ? src_val(d, s) : 0;
-        /* [witchtime] an unmapped joystick's axis drives a stick only once it has been near the centre: a mouse receiver that
+        /* [moonriver] an unmapped joystick's axis drives a stick only once it has been near the centre: a mouse receiver that
          * presents itself as a joystick (a Swiftpoint Z3: five axes resting at -32768) otherwise held both sticks pushed */
         if (!d->gp) { if (fabsf(v[i]) < 0.25f) d->armed |= 1 << i; if (!(d->armed >> i & 1)) v[i] = 0; }
         if (i & 1) v[i] = -v[i];                             /* SDL: down is positive; the Npad: up is positive */
@@ -729,7 +729,7 @@ void nnpad_rumble(int player, float low, float high) {
 }
 
 /* ================================================================ keyboard */
-static int env_kb(void) { const char *k = getenv("WT_KEYBOARD_PLAYER"); return k && k[0] ? atoi(k) : -1; }   /* -1 unset; 0 none; 1..8 */
+static int env_kb(void) { const char *k = getenv("MR_KEYBOARD_PLAYER"); return k && k[0] ? atoi(k) : -1; }   /* -1 unset; 0 none; 1..8 */
 int nnpad_keyboard_player(void) {
     int r;
     lock();
@@ -759,8 +759,8 @@ int nnpad_mouse_cfg(float *sens, int *invert) {      /* [Recomps#1] mouse_camera
 }
 /* [Recomps#1] button_prompts of [general] -> 1 switch, 2 playstation, 3 xbox, 4 keyboard. auto: the keyboard when it was used
  * last, else the SDL gamepad type of player 1's pad (else of the first pad) at the moment of the call, the keyboard without
- * one. prompts.c asks all the time; nnfs.c once, when it sets up the RomFS mods at the first file access. Scripted runs (WT_SEQ) and the XInput backend never read pads, so auto means switch there. */
-/* [witchtime] the PC settings panel (pcmenu.c): [general] button_prompts, as written in the file; a set keeps every other line
+ * one. prompts.c asks all the time; nnfs.c once, when it sets up the RomFS mods at the first file access. Scripted runs (MR_SEQ) and the XInput backend never read pads, so auto means switch there. */
+/* [moonriver] the PC settings panel (pcmenu.c): [general] button_prompts, as written in the file; a set keeps every other line
  * and counts at once. 0 = not written. */
 const char *nnpad_prompts_setting(void) {
     lock(); if (!g_cfg.path[0]) cfg_load(1); const char *s = g_prompts_name[g_cfg.prompts]; unlock();
@@ -797,7 +797,7 @@ int nnpad_prompts_set(const char *val) {
     unlock();
     return ok;
 }
-/* [witchtime] swap_confirm, the same way */
+/* [moonriver] swap_confirm, the same way */
 const char *nnpad_menu_swap_setting(void) {
     lock(); if (!g_cfg.path[0]) cfg_load(1); const char *s = g_cfg.menu_swap ? "on" : "off"; unlock();
     return s;
@@ -809,7 +809,7 @@ int nnpad_menu_swap_set(const char *val) {
     unlock();
     return ok;
 }
-/* [witchtime] layout (face buttons), the same way */
+/* [moonriver] layout (face buttons), the same way */
 const char *nnpad_layout_setting(void) {
     lock(); if (!g_cfg.path[0]) cfg_load(1); int l = g_cfg.def.layout; unlock();
     return l == 1 ? "labels" : l == 2 ? "auto" : "positional";
@@ -832,7 +832,7 @@ int nnpad_button_prompts(void) {
     lock(); if (!g_cfg.path[0]) cfg_load(1); int p = g_cfg.prompts, kb_only = g_cfg.input == 1; unlock();
     if (p) return p;
     if (kb_only || g_prompts_kb) return 4;
-    const char *seq = getenv("WT_SEQ"), *backend = getenv("WT_PAD_BACKEND");
+    const char *seq = getenv("MR_SEQ"), *backend = getenv("MR_PAD_BACKEND");
     if ((seq && seq[0]) || (backend && !_stricmp(backend, "xinput")) || !nnpad_init()) return 1;
     lock();
     const Dev *best = NULL;
@@ -857,7 +857,7 @@ int nnpad_button_prompts(void) {
  * layout. At the moment of the call (nnfs.c, the first file access). */
 int nnpad_prompts_by_letter(void) {
     lock(); if (!g_cfg.path[0]) cfg_load(1); int def = g_cfg.def.layout == 1; unlock();
-    const char *seq = getenv("WT_SEQ"), *backend = getenv("WT_PAD_BACKEND");
+    const char *seq = getenv("MR_SEQ"), *backend = getenv("MR_PAD_BACKEND");
     if ((seq && seq[0]) || (backend && !_stricmp(backend, "xinput")) || !nnpad_init()) return def;
     lock();
     const Dev *best = NULL;
@@ -1050,11 +1050,11 @@ int nnpad_tool(int argc, char **argv) {
     int secs = 0;
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--seconds") && i + 1 < argc) secs = atoi(argv[i + 1]);
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--pad-map")) return pad_map(i + 1 < argc ? atoi(argv[i + 1]) : 1);
-    if ((argc > 1 && !strcmp(argv[1], "--pad-test")) || getenv("WT_PAD_TEST")) return pad_test(secs);
+    if ((argc > 1 && !strcmp(argv[1], "--pad-test")) || getenv("MR_PAD_TEST")) return pad_test(secs);
     return -1;
 }
 
-/* ================================================================ self-test (WT_PAD_SELFTEST=1): SDL virtual joysticks, no physical pad */
+/* ================================================================ self-test (MR_PAD_SELFTEST=1): SDL virtual joysticks, no physical pad */
 static struct { Uint16 lo, hi; int calls, led_r, led_g, led_b, pidx; } g_vj[16];
 static bool SDLCALL vj_rumble(void *u, Uint16 lo, Uint16 hi) { int i = (int)(intptr_t)u; g_vj[i].lo = lo; g_vj[i].hi = hi; g_vj[i].calls++; return true; }
 static bool SDLCALL vj_led(void *u, Uint8 r, Uint8 g, Uint8 b) { int i = (int)(intptr_t)u; g_vj[i].led_r = r; g_vj[i].led_g = g; g_vj[i].led_b = b; return true; }
@@ -1085,12 +1085,12 @@ int nnpad_selftest(const NnHidHooks *h) {
     SDL_JoystickID id[10];
     SDL_Joystick *js[10];
     uint64_t btn; int32_t st[4]; uint32_t attr;
-    GetTempPathA(MAX_PATH, path); strcat(path, "wt_pad_selftest\\controllers.ini");
+    GetTempPathA(MAX_PATH, path); strcat(path, "mr_pad_selftest\\controllers.ini");
     make_dirs(path);
     DeleteFileA(path);
-    _putenv_s("WT_CONFIG", path);
-    _putenv_s("WT_KEYBOARD_PLAYER", "0");
-    _putenv_s("WT_PAD_LAYOUT", "");
+    _putenv_s("MR_CONFIG", path);
+    _putenv_s("MR_KEYBOARD_PLAYER", "0");
+    _putenv_s("MR_PAD_LAYOUT", "");
     g_only_virtual = 1;
     h->test_mode(1);
     printf("pad self-test (SDL virtual joysticks, no physical pad):\n");
@@ -1202,7 +1202,7 @@ int nnpad_selftest(const NnHidHooks *h) {
     }
     h->vibrate(0, 0, 0);
 
-    /* ---- [witchtime] keyboard + mouse on player 1, merged with its pad; bindings from the default file, then rebound */
+    /* ---- [moonriver] keyboard + mouse on player 1, merged with its pad; bindings from the default file, then rebound */
     {
         int ok = 1;
         vj_clear(js[0], SDL_GAMEPAD_BUTTON_COUNT, 6); settle();
@@ -1372,7 +1372,7 @@ int nnpad_selftest(const NnHidHooks *h) {
         fj = SDL_OpenJoystick(fill);                         /* fills the last free slot: 8 pads */
         rid = vj_make(10, 0x400, 0, 0);
         rj = SDL_OpenJoystick(rid);
-        for (int a = 0; a < 6; a++) SDL_SetJoystickVirtualAxis(rj, a, -32768);      /* [witchtime] axes resting at one end, as a mouse receiver's */
+        for (int a = 0; a < 6; a++) SDL_SetJoystickVirtualAxis(rj, a, -32768);      /* [moonriver] axes resting at one end, as a mouse receiver's */
         settle();
         check(rid != 0 && !SDL_IsGamepad(rid), "a virtual joystick of unknown type has NO gamepad mapping");
         for (int i = 0; i < 8; i++) { lock(); Dev *d = dev_of(i); if (d && !d->gp) raw_has = 1; unlock(); }

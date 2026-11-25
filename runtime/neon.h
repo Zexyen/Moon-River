@@ -241,7 +241,7 @@ static inline void v_ext(V128 *d, const V128 *pn, const V128 *pm, int imm, int q
     *d = r;
 }
 
-/* TBL / TBX with `len` consecutive table registers starting at index rn. With SSSE3 (wtbuild's cpu_level 2 and 3): one
+/* TBL / TBX with `len` consecutive table registers starting at index rn. With SSSE3 (mrbuild's cpu_level 2 and 3): one
  * byte shuffle per table register, keeping the bytes whose index falls in it (after Astral Chain Recomp's sv_tbl, MIT).
  * The byte loop stores single bytes that the next whole-register load cannot forward from. */
 #ifdef __SSSE3__

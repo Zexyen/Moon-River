@@ -4,15 +4,16 @@
 #include "ui_render.h"
 #include "update.h"
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cctype>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <sys/stat.h>
+#include <thread>
 
 namespace {
 
@@ -24,11 +25,11 @@ struct Group { const char *num, *name, *note; std::vector<std::string> steps; };
 const std::vector<Group>& groups()
 {
 	static const std::vector<Group> g = {
-		{"I", "Check your dump", "Tools, version and every data file", {"deps", "verify"}},
-		{"II", "Unpack and apply mods", "Code files and your code mods", {"convert", "mods"}},
-		{"III", "Translate the code", "Switch code to portable C", {"tables", "lift"}},
-		{"IV", "Compile", "The longest step", {"compile"}},
-		{"V", "Link and finish", "The game library and its self-test", {"link", "check"}},
+		{"1", "Check your dump", "Tools, version and every data file", {"deps", "verify"}},
+		{"2", "Extract and apply mods", "Code files and your code mods", {"convert", "mods"}},
+		{"3", "Translate the code", "Switch code to portable C", {"tables", "lift"}},
+		{"4", "Compile", "The longest step", {"compile"}},
+		{"5", "Link and finish", "The game library and its self-test", {"link", "check"}},
 	};
 	return g;
 }
@@ -58,6 +59,33 @@ const char* phase_of(const std::string& step)
 	return "working";
 }
 
+// Live astronomical moon phase from local clock (no network)
+double moon_phase_at(std::time_t now)
+{
+	constexpr double SYNODIC = 29.530588853;
+	constexpr double REF_NEW = 947182440.0;   // 2000-01-06 18:14:00 UTC
+	double p = std::fmod((double(now) - REF_NEW) / 86400.0 / SYNODIC, 1.0);
+	return p < 0.0 ? p + 1.0 : p;
+}
+const char* moon_phase_label(double p)
+{
+	if (p < 0.0185 || p > 0.9815)
+		return "New";
+	if (p < 0.2315)
+		return "Waxing crescent";
+	if (p < 0.2685)
+		return "First quarter";
+	if (p < 0.4815)
+		return "Waxing gibbous";
+	if (p < 0.5185)
+		return "Full";
+	if (p < 0.7315)
+		return "Waning gibbous";
+	if (p < 0.7685)
+		return "Last quarter";
+	return "Waning crescent";
+}
+
 struct SettingDef {
 	const char *key, *name, *note;
 	std::vector<std::pair<const char*, const char*>> options;   // value in the file, what the screen shows
@@ -69,28 +97,28 @@ struct SettingDef {
 const std::vector<SettingDef>& setting_defs()
 {
 	static const std::vector<SettingDef> d = {
-		{"window", "Display mode", "Windowed, or the monitor the window is on", {{"windowed", "Windowed"}, {"borderless", "Borderless"}, {"fullscreen", "Fullscreen"}}, 0},
-		{"size", "Window size", "The window in windowed mode",     // the file's width and height (read_setting)
+		{"window", "Display mode", "Windowed, or the whole monitor the window is on.", {{"windowed", "Windowed"}, {"borderless", "Borderless"}, {"fullscreen", "Fullscreen"}}, 0},
+		{"size", "Window size", "The window in windowed mode.",     // the file's width and height (read_setting)
 			{{"1280x720", "1280 × 720"}, {"1600x900", "1600 × 900"}, {"1920x1080", "1920 × 1080"}, {"2560x1440", "2560 × 1440"}, {"3840x2160", "3840 × 2160"}}, 0},
-		{"frame_rate", "Frame rate", "60 as on console; 90 / 120 experimental (smart timers and smoothings)",
+		{"frame_rate", "Frame rate", "60 is the console's. Higher is experimental.",
 			{{"60", "60 fps"}, {"90", "90 fps"}, {"120", "120 fps"}}, 0, "60"},
-		{"vsync", "Vertical sync", "Auto locks to a 60 / 120 / 240 Hz display",
+		{"vsync", "Vertical sync", "Auto locks to a 60, 120 or 240 Hz display.",
 			{{"auto", "Auto"}, {"display", "Display"}, {"clock", "Clock"}, {"off", "Off"}, {"on", "On"}, {"mailbox", "Mailbox"}}, 0},
 		// the launcher's own (config/launcher.ini; the game never reads it): App::sound
-		{"sounds", "Launcher sounds", "Soft ticks as you move through these screens", {{"on", "On"}, {"off", "Off"}}, 0, nullptr, "/launcher.ini"},
-		{"resolution_scale", "Internal resolution", "What the game renders at (1.0 = 720p, 1.5 = 1080p, 2.0 = 1440p, 3.0 = 4K)",
-			{{"0.5", "0.5 ×"}, {"0.75", "0.75 ×"}, {"1.0", "1.0 × (720p)"}, {"1.25", "1.25 ×"}, {"1.5", "1.5 × (1080p)"}, {"2.0", "2.0 × (1440p)"}, {"2.5", "2.5 ×"}, {"3.0", "3.0 × (4K)"}},
+		{"sounds", "Launcher sounds", "Soft ticks as you move through these screens.", {{"on", "On"}, {"off", "Off"}}, 0, nullptr, "/launcher.ini"},
+		{"resolution_scale", "Internal resolution", "720p is the console's docked size.",
+			{{"0.5", "0.5 ×"}, {"0.75", "0.75 ×"}, {"1.0", "720p"}, {"1.25", "1.25 ×"}, {"1.5", "1080p"}, {"2.0", "1440p"}, {"2.5", "2.5 ×"}, {"3.0", "2160p"}},
 			1, "1.0"},
-		{"hdr", "HDR", "Auto follows the desktop's HDR; lights go above white", {{"auto", "Auto"}, {"off", "Off"}, {"on", "On"}}, 1},
-		{"hdr_paper_white", "HDR white", "The game's white with HDR on; Auto is the desktop's",
+		{"hdr", "HDR", "Auto follows the desktop.", {{"auto", "Auto"}, {"off", "Off"}, {"on", "On"}}, 1},
+		{"hdr_paper_white", "HDR white", "The game's white with HDR on; Auto follows the desktop.",
 			{{"auto", "Auto"}, {"100", "100 nits"}, {"150", "150 nits"}, {"200", "200 nits"}, {"250", "250 nits"}, {"300", "300 nits"}, {"400", "400 nits"}}, 1},
-		{"hdr_peak", "HDR peak", "Your monitor's peak brightness, for the scene's lights",
+		{"hdr_peak", "HDR peak", "Your monitor's peak brightness, for the scene's lights.",
 			{{"auto", "Auto"}, {"400", "400 nits"}, {"600", "600 nits"}, {"800", "800 nits"}, {"1000", "1000 nits"}, {"1500", "1500 nits"}, {"2000", "2000 nits"}, {"4000", "4000 nits"}}, 1},
-		{"aspect", "Picture fit", "Keep 16:9, stretch, or native Wide (21:9 / 32:9)", {{"keep", "Keep shape"}, {"stretch", "Stretch"}, {"wide", "Wide"}}, 1},
-		{"button_prompts", "Button prompts", "Auto follows what you use",
+		{"aspect", "Aspect ratio", "Keep 16:9, stretch, or native Wide (21:9 / 32:9).", {{"keep", "Fixed 16:9"}, {"stretch", "Stretch"}, {"wide", "Wide"}}, 1},
+		{"button_prompts", "Button prompts", "Auto follows the controller or keyboard you use.",
 			{{"auto", "Auto"}, {"playstation", "PlayStation"}, {"xbox", "Xbox"}, {"switch", "Switch"}, {"keyboard", "Keyboard"}}, 2, nullptr, "/controllers.ini", "general"},
-		{"swap_confirm", "Swap Confirm", "Menus only: B confirms, A goes back", {{"off", "Off"}, {"on", "On"}}, 2, nullptr, "/controllers.ini", "general"},
-		{"layout", "Face buttons", "Position (Switch) or Printed letter (Xbox / PlayStation)",
+		{"swap_confirm", "Swap confirm", "Menus only: B confirms, A goes back.", {{"off", "Off"}, {"on", "On"}}, 2, nullptr, "/controllers.ini", "general"},
+		{"layout", "Face buttons", "Position (Switch) or Printed letter (Xbox / PlayStation).",
 			{{"auto", "Auto"}, {"positional", "Position"}, {"labels", "Printed letter"}}, 2, nullptr, "/controllers.ini", "general"},
 	};
 	return d;
@@ -176,10 +204,23 @@ double folder_bytes(const std::string& dir)
 	return used;
 }
 
-// why BuildRunner::start failed: a checkout where wtbuild was never built is told how to build it
+// why BuildRunner::start failed: a checkout where mrbuild was never built is told how to build it
 const char* start_error(const std::string& repo)
 {
 	return build_command(repo, "setup").empty() ? NO_BUILD_TOOL : "The build tool cannot be started.";
+}
+
+std::string format_threads_and_space(const std::string& dir)
+{
+	const unsigned threads = std::max(1u, std::thread::hardware_concurrency());
+	std::error_code ec;
+	const auto sp = std::filesystem::space(dir, ec);
+	char buf[128];
+	if (!ec && sp.available > 0)
+		std::snprintf(buf, sizeof buf, "%u threads · %.1f GB free", threads, double(sp.available) / 1e9);
+	else
+		std::snprintf(buf, sizeof buf, "%u threads", threads);
+	return buf;
 }
 
 } // namespace
@@ -210,13 +251,29 @@ bool App::init(int argc, char** argv)
 	SetupState st = SetupState::read(paths.build);
 	dump = st.dump;
 	model.DirtyVariable("dump");            // (the folder box was made when the model was, still empty)
+	const unsigned threads = std::max(1u, std::thread::hardware_concurrency());
+	{
+		char buf[160];
+		std::snprintf(buf, sizeof buf, "About 4 minutes on %u threads · About 15 GB free space", threads);
+		setup_footer = buf;
+		model.DirtyVariable("setup_footer");
+	}
+	tick_moon(true);
 	refresh_title();
 	refresh_build();
 	update::check(paths);
-	if (const char* t = std::getenv("LAUNCHER_TAB"))       // test aid: the settings' section
-		tab = std::atoi(t) % 3;
-	if (const char* s = std::getenv("LAUNCHER_SCREEN"))    // test aid: start on another screen (setup, build, mods, settings)
+	if (const char* t = std::getenv("MR_TAB"))             // test aid: the settings' section
+	{
+		tab = (std::atoi(t) % 3 + 3) % 3;
+		model.DirtyVariable("tab");
+	}
+	if (const char* s = std::getenv("MR_SCREEN"))          // test aid: start on another screen (setup, build, mods, settings)
 		go(s);
+	if (const char* shot = std::getenv("MR_SHOT"); shot && shot[0])
+	{
+		save_shot(shot);
+		running = false;
+	}
 	return true;
 }
 
@@ -242,13 +299,21 @@ bool App::create_window()
 	const SDL_WindowFlags api = SDL_WINDOW_VULKAN;
 	const SDL_GPUShaderFormat shaders = SDL_GPU_SHADERFORMAT_SPIRV;
 #endif
-	window = SDL_CreateWindow(APP_NAME, w, h, api | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+	const SDL_WindowFlags hidden = std::getenv("MR_SHOT") ? SDL_WINDOW_HIDDEN : 0;
+	window = SDL_CreateWindow(APP_NAME, w, h, api | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | hidden);
 	if (!window)
 	{
 		std::fprintf(stderr, "launcher: no window: %s\n", SDL_GetError());
 		return false;
 	}
 	SDL_SetWindowMinimumSize(window, 640, 400);
+#if SDL_VERSION_ATLEAST(3, 4, 0)
+	if (SDL_Surface* icon = SDL_LoadPNG((paths.ui + "/img/icon.png").c_str()))
+	{
+		SDL_SetWindowIcon(window, icon);
+		SDL_DestroySurface(icon);
+	}
+#endif
 	gpu = SDL_CreateGPUDevice(shaders, false, nullptr);
 	if (!gpu || !SDL_ClaimWindowForGPUDevice(gpu, window))
 	{
@@ -311,7 +376,7 @@ bool App::create_ui()
 void App::bind_model()
 {
 	prompts_read();
-	Rml::DataModelConstructor c = ctx->CreateDataModel("wt");
+	Rml::DataModelConstructor c = ctx->CreateDataModel("mr");
 	if (auto h = c.RegisterStruct<CheckRow>())
 	{
 		h.RegisterMember("text", &CheckRow::text);
@@ -336,8 +401,12 @@ void App::bind_model()
 	if (auto h = c.RegisterStruct<MenuRow>())
 	{
 		h.RegisterMember("label", &MenuRow::label);
+		h.RegisterMember("desc", &MenuRow::desc);
 		h.RegisterMember("tag", &MenuRow::tag);
-		h.RegisterMember("dim", &MenuRow::dim);
+		h.RegisterMember("transform", &MenuRow::transform);
+		h.RegisterMember("opacity", &MenuRow::opacity);
+		h.RegisterMember("selected", &MenuRow::selected);
+		h.RegisterMember("far", &MenuRow::far);
 	}
 	if (auto h = c.RegisterStruct<SettingRow>())
 	{
@@ -346,6 +415,7 @@ void App::bind_model()
 		h.RegisterMember("value", &SettingRow::value);
 		h.RegisterMember("index", &SettingRow::index);
 		h.RegisterMember("bump", &SettingRow::bump);
+		h.RegisterMember("changed", &SettingRow::changed);
 	}
 	c.RegisterArray<std::vector<CheckRow>>();
 	c.RegisterArray<std::vector<StepRow>>();
@@ -356,15 +426,20 @@ void App::bind_model()
 	c.Bind("screen", &screen);
 	c.Bind("built", &built);
 	c.Bind("menu", &menu);
+	c.Bind("menu_sel", &menu_sel);
+	c.Bind("menu_desc", &menu_desc);
 	c.Bind("version", &version);
 	c.Bind("app_name", &app_name);
 	c.Bind("stale", &stale);
-	c.Bind("hour_deg", &hour_deg);
-	c.Bind("minute_deg", &minute_deg);
+	c.Bind("moon_src", &moon_src);
+	c.Bind("shimmer_src", &shimmer_src);
+	c.Bind("moon_phase_name", &moon_phase_name);
 	c.Bind("status_bad", &status_bad);
 	c.Bind("status_title", &status_title);
 	c.Bind("status_line", &status_line);
 	c.Bind("footer_info", &footer_info);
+	c.Bind("setup_footer", &setup_footer);
+	c.Bind("build_footer", &build_footer);
 	c.Bind("update_tag", &update_tag);
 	c.Bind("dump", &dump);
 	c.Bind("checking", &checking);
@@ -390,46 +465,33 @@ void App::bind_model()
 	c.Bind("mods_rebuild", &mods_rebuild);
 	c.Bind("settings", &settings);
 	c.Bind("tab", &tab);
-	c.Bind("row_step", &row_step);
-	c.Bind("row_pitch", &row_pitch);
-	c.Bind("row_count", &row_count);
 	c.Bind("leaving", &leaving);
 	c.Bind("tex_note", &tex_note);
 	c.Bind("tex_action", &tex_action);
 	c.Bind("tex_switch", &tex_switch);
 	c.Bind("tex_remove", &tex_remove);
 	c.Bind("shortcut_note", &shortcut_note);
-	// footer hints: by the label on the button, as confirm and back in handle() go
-	c.BindFunc("glyph_ok", [this](Rml::Variant& v) { v = Rml::String(prompts == 4 ? "gen:glyph?n=enter&c=26222f" : prompts == 2 ? "gen:glyph?n=cross&c=26222f" : "gen:glyph?n=a&c=26222f"); });
-	c.BindFunc("glyph_back", [this](Rml::Variant& v) { v = Rml::String(prompts == 4 ? "gen:glyph?n=esc&c=26222f" : prompts == 2 ? "gen:glyph?n=circle&c=26222f" : "gen:glyph?n=b&c=26222f"); });
+	// footer hints: outlined glowing glyphs on Moon River's dark night footer (#eafaff)
+	c.BindFunc("glyph_ok", [this](Rml::Variant& v) { v = Rml::String(prompts == 4 ? "gen:glyph?n=enter&c=eafaff" : prompts == 2 ? "gen:glyph?n=cross&c=eafaff" : "gen:glyph?n=a&c=eafaff"); });
+	c.BindFunc("glyph_back", [this](Rml::Variant& v) { v = Rml::String(prompts == 4 ? "gen:glyph?n=esc&c=eafaff" : prompts == 2 ? "gen:glyph?n=circle&c=eafaff" : "gen:glyph?n=b&c=eafaff"); });
 	// the settings' sections (Q / E, the shoulder buttons) and a row's value (the arrow keys, the d-pad)
-	c.BindFunc("glyph_tab_l", [this](Rml::Variant& v) { v = Rml::String(prompts == 4 ? "gen:glyph?n=key&t=Q&c=26222f" : prompts == 1 ? "gen:glyph?n=bumper&t=L&c=26222f" : prompts == 2 ? "gen:glyph?n=bumper&t=L1&c=26222f" : "gen:glyph?n=bumper&t=LB&c=26222f"); });
-	c.BindFunc("glyph_tab_r", [this](Rml::Variant& v) { v = Rml::String(prompts == 4 ? "gen:glyph?n=key&t=E&c=26222f" : prompts == 1 ? "gen:glyph?n=bumper&t=R&c=26222f" : prompts == 2 ? "gen:glyph?n=bumper&t=R1&c=26222f" : "gen:glyph?n=bumper&t=RB&c=26222f"); });
-	c.BindFunc("glyph_change", [this](Rml::Variant& v) { v = Rml::String(prompts == 4 ? "gen:glyph?n=arrows&c=26222f" : "gen:glyph?n=dpad&c=26222f"); });
+	c.BindFunc("glyph_tab_l", [this](Rml::Variant& v) { v = Rml::String(prompts == 4 ? "gen:glyph?n=key&t=Q&c=eafaff" : prompts == 1 ? "gen:glyph?n=bumper&t=L&c=eafaff" : prompts == 2 ? "gen:glyph?n=bumper&t=L1&c=eafaff" : "gen:glyph?n=bumper&t=LB&c=eafaff"); });
+	c.BindFunc("glyph_tab_r", [this](Rml::Variant& v) { v = Rml::String(prompts == 4 ? "gen:glyph?n=key&t=E&c=eafaff" : prompts == 1 ? "gen:glyph?n=bumper&t=R&c=eafaff" : prompts == 2 ? "gen:glyph?n=bumper&t=R1&c=eafaff" : "gen:glyph?n=bumper&t=RB&c=eafaff"); });
+	c.BindFunc("glyph_change", [this](Rml::Variant& v) { v = Rml::String(prompts == 4 ? "gen:glyph?n=arrows&c=eafaff" : "gen:glyph?n=dpad&c=eafaff"); });
 	auto arg_int = [](const Rml::VariantList& a, size_t i) { return i < a.size() ? a[i].Get<int>() : 0; };
 	c.BindEventCallback("go", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
 		if (!a.empty())
 			go(a[0].Get<Rml::String>());
 	});
 	c.BindEventCallback("play", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { want_play = true; });
-	c.BindEventCallback("menu", [this, arg_int](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
+	c.BindEventCallback("menu_click", [this, arg_int](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList& a) {
 		const int i = arg_int(a, 0);
 		if (i < 0 || i >= int(menu.size()))
 			return;
-		const std::string act = menu[size_t(i)].action;
-		if (act == "play")
-			want_play = true;
-		else if (act == "update")
-		{
-			if (!runner.running())
-				update::start(paths);
-			else
-				go(job == Job::verify ? "setup" : "build");   // not over a job that runs: the job, as Play shows it
-		}
-		else if (act == "quit")
-			running = false;
+		if (i == menu_sel)
+			activate_menu(i);
 		else
-			go(act == "build" && runner.running() && job == Job::verify ? "setup" : act);   // (a dump check shows on the dump screen)
+			select_menu(i, true);
 	});
 	c.BindEventCallback("update", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
 		if (!runner.running())
@@ -442,7 +504,7 @@ void App::bind_model()
 	c.BindEventCallback("remove_textures", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) { remove_textures(); });
 	c.BindEventCallback("create_shortcut", [this](Rml::DataModelHandle, Rml::Event&, const Rml::VariantList&) {
 		// the release's own launcher at the top, which an update keeps in place; a checkout without one: this program
-		std::string top = paths.repo + "/" LAUNCHER_NAME WT_EXE, said;
+		std::string top = paths.repo + "/" LAUNCHER_NAME MR_EXE, said;
 		const char* desktop = SDL_GetUserFolder(SDL_FOLDER_DESKTOP);
 		create_shortcut(desktop ? desktop : "", is_program(top) ? top : paths.self, paths.ui + "/img/icon.png", &said);
 		shortcut_note = said;
@@ -559,7 +621,7 @@ void App::draw()
 	}
 	SDL_GPUColorTargetInfo clear{};
 	clear.texture = target;
-	clear.clear_color = {238 / 255.f, 237 / 255.f, 242 / 255.f, 1};   // pearl, the screens' ground
+	clear.clear_color = {3 / 255.f, 8 / 255.f, 23 / 255.f, 1};   // night sky (#030817)
 	clear.load_op = SDL_GPU_LOADOP_CLEAR;
 	clear.store_op = SDL_GPU_STOREOP_STORE;
 	SDL_EndGPURenderPass(SDL_BeginGPURenderPass(cmd, &clear, 1, nullptr));
@@ -567,6 +629,87 @@ void App::draw()
 	ctx->Render();
 	render->EndFrame();
 	SDL_SubmitGPUCommandBuffer(cmd);
+}
+
+void App::save_shot(const char* path)
+{
+	// Render an exact 1280x800 frame offscreen after letting fade-in animations finish, and write it as PNG (test aid)
+	const Uint32 w = Uint32(LAYOUT_W), h = Uint32(LAYOUT_H);
+	ctx->SetDimensions({int(w), int(h)});
+	ctx->SetDensityIndependentPixelRatio(1.f);
+	ctx->Update();
+	if (want_focus)
+	{
+		want_focus = false;
+		focus_first();
+		ctx->Update();
+	}
+	// Advance past initial screen fade-in (0.28s) so the captured frame is at full opacity
+	SDL_Delay(350);
+	ctx->Update();
+
+	const SDL_GPUTextureFormat fmt = SDL_GetGPUSwapchainTextureFormat(gpu, window);
+	SDL_GPUTextureCreateInfo ti{};
+	ti.type = SDL_GPU_TEXTURETYPE_2D;
+	ti.format = fmt;
+	ti.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+	ti.width = w;
+	ti.height = h;
+	ti.layer_count_or_depth = 1;
+	ti.num_levels = 1;
+	SDL_GPUTexture* tex = SDL_CreateGPUTexture(gpu, &ti);
+	if (!tex)
+		return;
+	SDL_GPUTransferBufferCreateInfo tbi{};
+	tbi.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+	tbi.size = w * h * 4;
+	SDL_GPUTransferBuffer* xfer = SDL_CreateGPUTransferBuffer(gpu, &tbi);
+	SDL_GPUCommandBuffer* cmd = xfer ? SDL_AcquireGPUCommandBuffer(gpu) : nullptr;
+	if (cmd)
+	{
+		SDL_GPUColorTargetInfo clear{};
+		clear.texture = tex;
+		clear.clear_color = {3 / 255.f, 8 / 255.f, 23 / 255.f, 1};
+		clear.load_op = SDL_GPU_LOADOP_CLEAR;
+		clear.store_op = SDL_GPU_STOREOP_STORE;
+		SDL_EndGPURenderPass(SDL_BeginGPURenderPass(cmd, &clear, 1, nullptr));
+		render->BeginFrame(cmd, tex, w, h);
+		ctx->Render();
+		render->EndFrame();
+		SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
+		SDL_GPUTextureRegion src{};
+		src.texture = tex;
+		src.w = w;
+		src.h = h;
+		src.d = 1;
+		SDL_GPUTextureTransferInfo dst{};
+		dst.transfer_buffer = xfer;
+		dst.pixels_per_row = w;
+		dst.rows_per_layer = h;
+		SDL_DownloadFromGPUTexture(copy, &src, &dst);
+		SDL_EndGPUCopyPass(copy);
+		SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+		if (fence)
+		{
+			SDL_WaitForGPUFences(gpu, true, &fence, 1);
+			SDL_ReleaseGPUFence(gpu, fence);
+		}
+		if (void* mem = SDL_MapGPUTransferBuffer(gpu, xfer, false))
+		{
+#if SDL_VERSION_ATLEAST(3, 4, 0)
+			const bool bgra = fmt == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM || fmt == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
+			if (SDL_Surface* surf = SDL_CreateSurfaceFrom(int(w), int(h), bgra ? SDL_PIXELFORMAT_BGRA32 : SDL_PIXELFORMAT_RGBA32, mem, int(w * 4)))
+			{
+				SDL_SavePNG(surf, path);
+				SDL_DestroySurface(surf);
+			}
+#endif
+			SDL_UnmapGPUTransferBuffer(gpu, xfer);
+		}
+	}
+	if (xfer)
+		SDL_ReleaseGPUTransferBuffer(gpu, xfer);
+	SDL_ReleaseGPUTexture(gpu, tex);
 }
 
 void App::rescale()
@@ -673,9 +816,49 @@ void App::handle(SDL_Event& ev)
 		return;
 	}
 	case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-		if (std::abs(int(ev.gaxis.value)) > 16384)            // past half, as the game: a drifting stick is not use
+	{
+		const int v = int(ev.gaxis.value);
+		if (std::abs(v) > 16384)
 			prompts_use(SDL_GetGamepadFromID(ev.gaxis.which));
+		constexpr int HIGH = 18000, LOW = 9800;
+		if (ev.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY)
+		{
+			const int d = v < -HIGH ? -1 : v > HIGH ? 1 : std::abs(v) < LOW ? 0 : stick_y;
+			if (d != stick_y)
+			{
+				stick_y = d;
+				if (d != 0)
+				{
+					key(d < 0 ? Rml::Input::KI_UP : Rml::Input::KI_DOWN);
+					stick_next = now_seconds() + 0.35;
+				}
+			}
+		}
+		else if (ev.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX)
+		{
+			const int d = v < -HIGH ? -1 : v > HIGH ? 1 : std::abs(v) < LOW ? 0 : stick_x;
+			if (d != stick_x)
+			{
+				stick_x = d;
+				if (d != 0)
+				{
+					key(d < 0 ? Rml::Input::KI_LEFT : Rml::Input::KI_RIGHT);
+					stick_next = now_seconds() + 0.35;
+				}
+			}
+		}
 		return;
+	}
+	case SDL_EVENT_MOUSE_WHEEL:
+		if (screen == "title" && !menu.empty())
+		{
+			if (ev.wheel.y > 0)
+				select_menu((menu_sel - 1 + int(menu.size())) % int(menu.size()), true);
+			else if (ev.wheel.y < 0)
+				select_menu((menu_sel + 1) % int(menu.size()), true);
+			return;
+		}
+		break;
 	case SDL_EVENT_MOUSE_BUTTON_DOWN:
 		prompts_use(4);
 		if (ev.button.button == SDL_BUTTON_LEFT && hint_click(ev.button.x * SDL_GetWindowPixelDensity(window)))
@@ -708,6 +891,17 @@ void App::handle(SDL_Event& ev)
 		rescale();
 }
 
+void App::tick_stick()
+{
+	if ((stick_x == 0 && stick_y == 0) || now_seconds() < stick_next)
+		return;
+	stick_next = now_seconds() + 0.16;
+	if (stick_y != 0)
+		key(stick_y < 0 ? Rml::Input::KI_UP : Rml::Input::KI_DOWN);
+	else if (stick_x != 0)
+		key(stick_x < 0 ? Rml::Input::KI_LEFT : Rml::Input::KI_RIGHT);
+}
+
 // a click on a hint of the bottom row presses its key (issue 197). RmlUi never sees the click: it would move the focus
 // to the hint, and the keys act on the focused control. x: the pointer, in the context's pixels.
 bool App::hint_click(float x)
@@ -733,8 +927,11 @@ bool App::hint_click(float x)
 
 // the control under the mouse takes the focus (not shown as the keys' focus), so one row is lit, not the hovered one and
 // the one the keys left, and the keys go on from where the mouse is. Not once the dump folder's box is in use (typed).
+// On the title carousel, clicking selects/activates items so hover does not shift items out from under the cursor.
 void App::hover_focus()
 {
+	if (screen == "title")
+		return;
 	Rml::Element* h = control_of(ctx->GetHoverElement());
 	Rml::Element* f = control_of(ctx->GetFocusElement());
 	if (h && h != f && h->IsVisible(true) && h->GetTagName() != "input" && !(typed && f && f->GetTagName() == "input"))
@@ -745,14 +942,31 @@ void App::hover_focus()
 bool App::key(Rml::Input::KeyIdentifier k)
 {
 	using namespace Rml::Input;
+	if (screen == "title" && !menu.empty())
+	{
+		if (k == KI_UP)
+		{
+			select_menu((menu_sel - 1 + int(menu.size())) % int(menu.size()), true);
+			return true;
+		}
+		if (k == KI_DOWN)
+		{
+			select_menu((menu_sel + 1) % int(menu.size()), true);
+			return true;
+		}
+		if (k == KI_RETURN || k == KI_NUMPADENTER || k == KI_SPACE)
+		{
+			activate_menu(menu_sel);
+			return true;
+		}
+		return false;
+	}
 	Rml::Element* focus = ctx->GetFocusElement();
 	// a click focuses what is under the pointer (a row's arrow, a switch's knob): the keys act for the control around it
 	Rml::Element* control = focus;
 	while (control && control->GetComputedValues().tab_index() != Rml::Style::TabIndex::Auto)
 		control = control->GetParentNode();
-	// a focused button that data-if hid (Stop when the build ends) leaves the focus on its parent, in no control: the keys
-	// that move or press take it back, to the other button of the converted textures' row (its Remove hid itself, or its
-	// words were clicked), else to the screen's first control
+	// a focused button that data-if hid (Stop when the build ends) leaves the focus on its parent, in no control
 	if (!control || !control->IsVisible(true))
 	{
 		if (k == KI_UP || k == KI_DOWN || k == KI_RETURN || k == KI_NUMPADENTER)
@@ -772,9 +986,12 @@ bool App::key(Rml::Input::KeyIdentifier k)
 		focus = control = nullptr;
 	}
 	bool editing = focus && focus->GetTagName() == "input";
-	if ((k == KI_RETURN || k == KI_NUMPADENTER) && focus && !editing && focus != ctx->GetDocument(0))
+	if ((k == KI_RETURN || k == KI_NUMPADENTER) && control && !editing && control != ctx->GetDocument(0))
 	{
-		focus->Click();
+		if (control->IsClassSet("setting"))
+			step_setting(std::atoi(control->GetAttribute<Rml::String>("index", "0").c_str()), 1);
+		else
+			control->Click();
 		return true;
 	}
 	if ((k == KI_LEFT || k == KI_RIGHT) && control && control->IsClassSet("side"))     // buttons side by side in a row
@@ -817,7 +1034,7 @@ void App::back()
 // ---------------------------------------------------------------------------------------------------- screens
 void App::go(const Rml::String& to)
 {
-	if (to != screen && !screen.empty() && !std::getenv("LAUNCHER_SCREEN"))
+	if (to != screen && !screen.empty() && !std::getenv("MR_SCREEN"))
 	{                                      // the screen on show leaves first (its animations); tick() opens the next one
 		next_screen = to;
 		if (!leaving)
@@ -833,6 +1050,7 @@ void App::go_now(const Rml::String& to)
 	typed = false;
 	model.DirtyVariable("leaving");
 	screen = to;
+	tick_moon(true);
 	if (to == "title")
 		refresh_title();
 	else if (to == "mods")
@@ -845,6 +1063,67 @@ void App::go_now(const Rml::String& to)
 	want_focus = true;
 }
 
+void App::select_menu(int index, bool play_sound)
+{
+	if (menu.empty())
+		return;
+	index = std::clamp(index, 0, int(menu.size()) - 1);
+	if (index == menu_sel)
+		return;
+	menu_sel = index;
+	refresh_menu_layout();
+	if (play_sound)
+		sound(0);
+}
+
+void App::activate_menu(int index)
+{
+	if (index < 0 || index >= int(menu.size()))
+		return;
+	const std::string act = menu[size_t(index)].action;
+	if (act == "play")
+		want_play = true;
+	else if (act == "update")
+	{
+		if (!runner.running())
+			update::start(paths);
+		else
+			go(job == Job::verify ? "setup" : "build");
+	}
+	else if (act == "quit")
+		running = false;
+	else
+		go(act == "build" && runner.running() && job == Job::verify ? "setup" : act);
+}
+
+void App::refresh_menu_layout()
+{
+	if (menu.empty())
+		return;
+	menu_sel = std::clamp(menu_sel, 0, int(menu.size()) - 1);
+	static const float opacities[4] = {1.0f, 0.42f, 0.14f, 0.0f};
+	for (int i = 0; i < int(menu.size()); i++)
+	{
+		const int o = i - menu_sel;
+		const int a = std::min(std::abs(o), 3);
+		const float sc = 1.0f - a * 0.12f;
+		char tf[64];
+		std::snprintf(tf, sizeof tf, "translateY(%ddp) scale(%.2f)", o * 58, sc);
+		menu[size_t(i)].transform = tf;
+		menu[size_t(i)].opacity = opacities[a];
+		menu[size_t(i)].selected = (o == 0);
+		menu[size_t(i)].far = (a >= 3);
+	}
+	// Show urgent status on the description bar if an error/update/build status is active, else the chosen menu item's description
+	std::string tag, message;
+	const update::State us = update::state(tag, message);
+	const bool urgent = status_bad || us == update::State::working || stale || (runner.running() && job == Job::build);
+	menu_desc = urgent && !status_line.empty() ? status_line : menu[size_t(menu_sel)].desc;
+	model.DirtyVariable("menu");
+	model.DirtyVariable("menu_sel");
+	model.DirtyVariable("menu_desc");
+}
+
 void App::refresh_title()
 {
 	built = file_exists(paths.build + "/" + GAME_EXE) && file_exists(paths.build + "/" + GAME_LIB) &&
@@ -852,21 +1131,14 @@ void App::refresh_title()
 	std::string built_version;
 	std::getline(std::ifstream(paths.build + "/" BUILT_VERSION), built_version);
 	// the game is built on the player's PC, so new launcher files (auto-update or unpacked by hand) leave an old game in build/ [issue 22]
-	stale = built && WT_VERSION[0] == 'v' && built_version != WT_VERSION;
+	stale = built && MR_VERSION[0] == 'v' && built_version != MR_VERSION;
 	status_bad = false;
 	std::string tag, message;
 	const update::State us = update::state(tag, message);
 	update_tag = us == update::State::available || us == update::State::failed ? tag : "";
-	// the message band: one sentence on where things stand
-	std::string when_built;
-	if (built)
-	{
-		struct stat st;
-		char when[64] = "";
-		if (stat((paths.build + "/" + GAME_LIB).c_str(), &st) == 0)
-			std::strftime(when, sizeof when, "%e %b", std::localtime(&st.st_mtime));
-		when_built = when[0] == ' ' ? when + 1 : when;
-	}
+	if (const char* demo_upd = std::getenv("MR_UPDATE_DEMO"); demo_upd && demo_upd[0])
+		update_tag = demo_upd;
+	// the status line (shown in the description band when urgent)
 	if (us == update::State::working)
 	{
 		status_title = "UPDATING";
@@ -887,7 +1159,7 @@ void App::refresh_title()
 	else if (stale)
 	{
 		status_title = "UPDATED";
-		status_line = "Now " WT_VERSION ". Rebuild before you play.";
+		status_line = "Now " MR_VERSION ". Rebuild before you play.";
 	}
 	else if (returned_code > 0)
 	{
@@ -895,54 +1167,69 @@ void App::refresh_title()
 		status_title = "THE GAME STOPPED";
 		status_line = "The game stopped with exit code " + std::to_string(returned_code) + ". Its log is in build/run.";
 	}
-	else if (built && us == update::State::available)
+	else if (built && !update_tag.empty())
 	{
 		status_title = "UPDATE AVAILABLE";
-		status_line = tag + " is out. Update installs it; Play starts this version.";
+		status_line = update_tag + " is out. Update installs it; Play starts this version.";
 	}
 	else if (built)
 	{
 		status_title = returned_code == 0 ? "WELCOME BACK" : "READY";
-		status_line = returned_code == 0 ? "Welcome back." : "Ready to play.";
+		status_line = returned_code == 0 ? "Welcome back." : "Start Bayonetta 2, built from your own dump.";
 	}
 	else
 	{
 		status_title = "NOT BUILT YET";
-		status_line = "Set up the build to play.";
+		status_line = "Point the launcher at your copy of Bayonetta 2 to build it.";
 	}
 	const char* driver = gpu ? SDL_GetGPUDeviceDriver(gpu) : nullptr;
-	int mods_on = 0;
+	int mods_on = 0, mods_total = 0;
 	const SetupState st = SetupState::read(paths.build);
 	std::string mods_err;
-	for (const ModEntry& m : list_mods(paths, st.mods_dir.empty() ? paths.mods : st.mods_dir, mods_err))
+	const auto mod_list = list_mods(paths, st.mods_dir.empty() ? paths.mods : st.mods_dir, mods_err);
+	mods_total = int(mod_list.size());
+	for (const ModEntry& m : mod_list)
 		mods_on += m.on;
-	footer_info = std::string(WT_VERSION " · ") + (driver && !std::strcmp(driver, "vulkan") ? "Vulkan" : driver ? driver : "") +
-		(pads.empty() ? " · Keyboard and mouse" : " · Controller connected");
-	if (built)
-	{
-		footer_info += " · Built " + when_built + " from your dump";
-		if (mods_on)
-			footer_info += ", " + std::to_string(mods_on) + (mods_on == 1 ? " mod on" : " mods on");
-	}
-	if (!update_tag.empty() && us == update::State::available)
-		footer_info += " · Update " + update_tag + " available";
-	version = WT_VERSION;
-	// the staircase of bars
+	footer_info = std::string(MR_VERSION);
+	footer_info += built ? " · Built from your dump" : " · Not built yet";
+	if (driver && driver[0])
+		footer_info += std::string(" · ") + (!std::strcmp(driver, "vulkan") ? "Vulkan" : driver);
+	if (mods_on > 0)
+		footer_info += " · " + std::to_string(mods_on) + (mods_on == 1 ? " mod on" : " mods on");
+	version = MR_VERSION;
+
+	// Centered Moon River title menu column
+	const std::string prev_action = (!menu.empty() && menu_sel >= 0 && menu_sel < int(menu.size())) ? menu[size_t(menu_sel)].action : "";
 	menu.clear();
 	if (built)
-		menu.push_back({"Play", "", "play", false});
+		menu.push_back({"Play", "Start Bayonetta 2, built from your own dump.", "", "play"});
 	else
-		menu.push_back({"Set up", "", "setup", false});
-	if (!update_tag.empty() && us != update::State::working)
-		menu.push_back({"Update", update_tag, "update", false});
-	menu.push_back({"Mods", "", "mods", false});
-	menu.push_back({"Settings", "", "settings", false});
+		menu.push_back({"Set up", "Point the launcher at your copy of Bayonetta 2 and build it.", "", "setup"});
+	const std::string mods_desc = mods_total > 0
+		? ("Turn code and RomFS mods on or off. " + std::to_string(mods_on) + " of " + std::to_string(mods_total) + " on.")
+		: "Turn code and RomFS mods on or off.";
+	menu.push_back({"Mods", mods_desc, "", "mods"});
+	menu.push_back({"Settings", "Display, graphics and controls.", "", "settings"});
 	if (built)
 	{
-		menu.push_back({"Rebuild", "", "build", false});
-		menu.push_back({"Change dump", "", "setup", false});
+		menu.push_back({"Your dump", "Change the game files this copy is built from, or rebuild.", "", "setup"});
+		menu.push_back({"Rebuild", "Rebuild the game from your dump, or view the last build.", "", "build"});
 	}
-	menu.push_back({"Quit", "", "quit", true});
+	if (!update_tag.empty() && us != update::State::working)
+		menu.push_back({"Update to " + update_tag, "A newer release is out. Your settings and saves are kept.", "New", "update"});
+	menu.push_back({"Quit", "Close the launcher.", "", "quit"});
+
+	// Keep the previously selected item if still present
+	if (!prev_action.empty())
+	{
+		for (int i = 0; i < int(menu.size()); i++)
+			if (menu[size_t(i)].action == prev_action)
+			{
+				menu_sel = i;
+				break;
+			}
+	}
+	refresh_menu_layout();
 	model.DirtyVariable("built");
 	model.DirtyVariable("stale");
 	model.DirtyVariable("status_bad");
@@ -950,12 +1237,12 @@ void App::refresh_title()
 	model.DirtyVariable("status_line");
 	model.DirtyVariable("footer_info");
 	model.DirtyVariable("update_tag");
-	model.DirtyVariable("menu");
 	model.DirtyVariable("version");
 }
 
 void App::refresh_build()
 {
+	build_footer = format_threads_and_space(paths.repo);
 	if (job == Job::textures && runner.running())
 	{
 		building = true;
@@ -963,13 +1250,13 @@ void App::refresh_build()
 		progress = runner.to_compile > 0 ? float(runner.compiled) / float(runner.to_compile) : 0;
 		percent = int(progress * 100 + .5f);
 		phase = "converting textures";
-		build_aside = "archive " + std::to_string(runner.compiled) + " of " + std::to_string(runner.to_compile) + " · " + minutes(now_seconds() - runner.started_at) + " so far";
+		build_aside = "Archive " + std::to_string(runner.compiled) + " of " + std::to_string(runner.to_compile) + " · " + minutes(now_seconds() - runner.started_at) + " so far";
 		build_line = stale ? "Converting textures. Stop it to rebuild; Settings goes on with it later."
 			: "Converting textures. Play stops it; Settings goes on with it later.";
 		log.clear();
-		for (size_t i = runner.lines.size() > 6 ? runner.lines.size() - 6 : 0; i < runner.lines.size(); i++)
+		for (size_t i = runner.lines.size() > 16 ? runner.lines.size() - 16 : 0; i < runner.lines.size(); i++)
 			log.push_back(runner.lines[i]);
-		for (const char* v : {"progress", "percent", "building", "converting", "phase", "build_aside", "build_line", "log", "build_error"})
+		for (const char* v : {"progress", "percent", "building", "converting", "phase", "build_aside", "build_line", "build_footer", "log", "build_error"})
 			model.DirtyVariable(v);
 		return;
 	}
@@ -996,8 +1283,10 @@ void App::refresh_build()
 	percent = int(progress * 100 + .5f);
 
 	steps.clear();
-	for (const Group& g : groups())
+	int active_group = -1;
+	for (int gi = 0; gi < int(groups().size()); gi++)
 	{
+		const Group& g = groups()[size_t(gi)];
 		StepRow r{g.num, g.name, g.note, "", "wait"};
 		bool all_done = std::all_of(g.steps.begin(), g.steps.end(), is_done);
 		bool here = run && std::find(g.steps.begin(), g.steps.end(), runner.current) != g.steps.end();
@@ -1010,6 +1299,7 @@ void App::refresh_build()
 		else if (here)
 		{
 			r.state = "run";
+			active_group = gi;
 			if (runner.current == "compile" && runner.to_compile > 0)
 				r.note = std::to_string(runner.compiled) + " of " + std::to_string(runner.to_compile) + " files";
 			r.right = phase_of(runner.current);
@@ -1027,25 +1317,31 @@ void App::refresh_build()
 			r.right = run ? "Next" : "";
 		steps.push_back(r);
 	}
-	if (const char* d = std::getenv("LAUNCHER_BUILD_DEMO"))     // test aid: the first n stages done, the next running
+	if (const char* d = std::getenv("MR_BUILD_DEMO"))          // test aid: the first n stages done, the next running
 	{
 		const int n = std::atoi(d);
 		for (int i = 0; i < int(steps.size()); i++)
-			steps[i].state = i < n ? "done" : i == n ? "run" : "wait";
-		progress = std::clamp(float(n) / float(steps.size()) + 0.1f, 0.f, 1.f);
+			steps[size_t(i)].state = i < n ? "done" : i == n ? "run" : "wait";
+		active_group = std::clamp(n, 0, int(steps.size()) - 1);
+		progress = std::clamp((float(n) + 0.1f) / float(steps.size()), 0.f, 1.f);
 		percent = int(progress * 100 + .5f);
 	}
 	building = run;
 	converting = false;
-	phase = run ? phase_of(runner.current) : complete ? "ready" : !runner.failed.empty() ? "stopped" : progress > 0 ? "paused" : "not started";
-	build_aside = run ? "step " + std::to_string(std::max(cur, 0) + 1) + " of " + std::to_string(BuildRunner::steps().size()) + " · " + minutes(now_seconds() - runner.started_at) + " so far" : phase;
+	phase = run ? phase_of(runner.current) : complete ? "Ready" : !runner.failed.empty() ? "Stopped" : progress > 0 ? "Paused" : "Not started";
+	if (run)
+		build_aside = "Step " + std::to_string(std::max(active_group, 0) + 1) + " of " + std::to_string(steps.size()) + " · " + minutes(now_seconds() - runner.started_at) + " so far";
+	else if (std::getenv("MR_BUILD_DEMO"))
+		build_aside = "Step " + std::to_string(std::max(active_group, 0) + 1) + " of " + std::to_string(steps.size()) + " · demo";
+	else
+		build_aside = phase;
 	if (run)
 	{
 		std::string doing = phase_of(runner.current);
 		doing[0] = char(std::toupper(static_cast<unsigned char>(doing[0])));
 		if (runner.current == "compile" && runner.to_compile > 0)
 			doing += " " + std::to_string(runner.compiled) + " of " + std::to_string(runner.to_compile) + " files";
-		build_line = doing + ". Close the window any time; it resumes.";
+		build_line = doing + ". Close the window any time and it resumes.";
 	}
 	else
 		build_line = complete ? (stale ? "Built by an older version. Rebuild to play." : "Built from your dump. Ready to play.")
@@ -1053,9 +1349,9 @@ void App::refresh_build()
 			progress > 0 ? "Paused part way. Build to go on from where it stopped." : "Not built yet.";
 	log.clear();
 	if (job == Job::build || !runner.lines.empty())
-		for (size_t i = runner.lines.size() > 6 ? runner.lines.size() - 6 : 0; i < runner.lines.size(); i++)
+		for (size_t i = runner.lines.size() > 16 ? runner.lines.size() - 16 : 0; i < runner.lines.size(); i++)
 			log.push_back(runner.lines[i]);
-	for (const char* v : {"progress", "percent", "steps", "building", "converting", "phase", "build_aside", "build_line", "log", "build_error"})
+	for (const char* v : {"progress", "percent", "steps", "building", "converting", "phase", "build_aside", "build_line", "build_footer", "log", "build_error"})
 		model.DirtyVariable(v);
 }
 
@@ -1068,14 +1364,22 @@ void App::refresh_mods()
 	int on = 0, code_on = 0;
 	for (const ModEntry& m : mod_entries)
 	{
-		mods.push_back({m.label, m.note.empty() ? (m.code ? (m.data ? "Code patches and data files" : "Code patches") : "Data files, read at start") : m.note,
-			m.code ? (m.data ? "CODE + DATA" : "CODE") : "DATA", m.on});
+		mods.push_back({m.label, m.note.empty() ? (m.code ? (m.data ? "Code patches and RomFS files" : "Code patches") : "RomFS files, read at start") : m.note,
+			m.code ? (m.data ? "Code + RomFS" : "Code") : "RomFS", m.on});
 		on += m.on;
 		code_on += m.on && m.code;
 	}
 	mods_error = error;
-	mods_summary = mods.empty() ? "No mods found." : std::to_string(on) + (on == 1 ? " mod on, " : " mods on, ") + std::to_string(code_on) +
-		" of them in code. Changing a code mod rebuilds part of the game.";
+	if (mods.empty())
+		mods_summary = "No mods found.";
+	else
+	{
+		mods_summary = std::to_string(on) + " of " + std::to_string(mods.size()) + " mods on";
+		if (mods_rebuild)
+			mods_summary += " · A code mod changed, so rebuild to apply it.";
+		else if (code_on > 0)
+			mods_summary += " · " + std::to_string(code_on) + " in code.";
+	}
 	for (const char* v : {"mods", "mods_error", "mods_summary", "mods_rebuild"})
 		model.DirtyVariable(v);
 }
@@ -1093,9 +1397,7 @@ void App::toggle_mod(int index)
 	sound(0);
 }
 
-// bumped: the row just changed, the only one whose value nudges. RmlUi starts an element's animations again whenever a
-// data view that names them is run (its "same value?" test never passes for 'animation'), so only what changed is
-// marked dirty here: the rows' way in names tab and row_count, and those are left alone when a value changes.
+// bumped: the row just changed, the only one whose value nudges.
 void App::refresh_settings(int bumped)
 {
 	for (int n = 0; n < 64; n++)
@@ -1111,23 +1413,12 @@ void App::refresh_settings(int bumped)
 		std::string v = read_setting(paths.config, d);
 		int i = option_index(d, v);
 		const int b = n < 64 ? bump_count[n] : 0;   // the value nudges the way it went; two names a direction, so a second change the same way starts it again
+		const bool chg = n < 64 && session_changed[n];
 		settings.push_back({d.name, d.note, i >= 0 ? d.options[size_t(i)].second : v, int(n),
-			b == 0 ? Rml::String("none") : Rml::String("0.25s cubic-out bump-") + (b < 0 ? "l" : "r") + (std::abs(b) % 2 ? "-a" : "-b")});
+			b == 0 ? Rml::String("none") : Rml::String("0.25s cubic-out bump-") + (b < 0 ? "l" : "r") + (std::abs(b) % 2 ? "-a" : "-b"),
+			chg});
 	}
-	// the staircase (rows 500 dp wide from 620 dp) ends 20 dp inside the 1280 dp stage, however many rows a section has.
-	// Rows that step less than the diagonal (22.6 dp a 56 dp row) close in on its rule, 40 dp from the first row's corner:
-	// they come closer together too, so the last stays 12 dp clear (Graphics' nine, the converted textures' row too)
-	const float rows = float(settings.size() + (tab == 0 || (tab == 1 && TEXTURES) ? 1 : 0)), tan22 = 0.4040f;   // Display: the desktop shortcut's row
-	row_step = rows > 1 ? std::min(26.f, 140.f / (rows - 1)) : 26.f;
-	row_pitch = rows > 1 ? std::clamp((row_step + 28.f / (rows - 1)) / tan22, 50.f, 56.f) : 56.f;
 	model.DirtyVariable("settings");
-	if (row_count != int(settings.size()))
-	{
-		row_count = int(settings.size());
-		model.DirtyVariable("row_count");
-	}
-	model.DirtyVariable("row_step");
-	model.DirtyVariable("row_pitch");
 
 	// #54: what the converted textures would cost, before they cost it
 	namespace fs = std::filesystem;
@@ -1150,7 +1441,7 @@ void App::refresh_settings(int bumped)
 	else
 		std::snprintf(note, sizeof note, "Normally made after a build. Takes about 16 GB of disk (%.0f GB free), 16 minutes on 4 cores, roughly 33 on a Steam Deck. Less CPU work while playing, a sharper picture.", room / 1e9);
 	tex_note = TEXTURES ? note : "";
-	tex_action = !TEXTURES || !built || complete || room + used < need ? "" : used > 0 ? "CONTINUE" : "CONVERT";
+	tex_action = !TEXTURES || !built || complete || room + used < need ? "" : used > 0 ? "Continue" : "Convert";
 	tex_remove = TEXTURES && used > 0;
 	tex_switch = !TEXTURES || !complete ? "" : on ? "Turn off" : "Turn on";
 	for (const char* v : {"tex_note", "tex_action", "tex_remove", "tex_switch"})
@@ -1173,8 +1464,11 @@ void App::step_setting(int index, int dir)
 		return;
 	const SettingDef& d = defs[size_t(index)];
 	write_setting(paths.config, d, d.options[size_t(next_option(d, read_setting(paths.config, d), dir))].first);
-	if (index < 64)                        // the value nudges the way it went (the row's animation name changes with each count)
+	if (index < 64)
+	{
 		bump_count[index] = (std::abs(bump_count[index]) + 1) * (dir < 0 ? -1 : 1);
+		session_changed[index] = true;
+	}
 	refresh_settings(index);
 	prompts_read();
 	sound(0);                              // (after the write: switching the sounds on ticks, off does not)
@@ -1318,25 +1612,42 @@ void App::start_build()
 	go("build");
 }
 
-void App::tick_clock()
+void App::tick_moon(bool force)
 {
-	std::time_t now = std::time(nullptr);
-	std::tm* t = std::localtime(&now);
-	if (!t)
+	const std::time_t now = std::time(nullptr);
+	const bool dim = screen != "title";
+	if (!force && dim == moon_dim_last && now - moon_checked_at < 600)
 		return;
-	const float m = t->tm_min * 6 + t->tm_sec * 0.1f, h = (t->tm_hour % 12) * 30 + t->tm_min * 0.5f;
-	if (m == minute_deg && h == hour_deg)
+	moon_checked_at = now;
+	double p = moon_phase_at(now);
+	if (const char* e = std::getenv("MR_MOON_PHASE"); e && e[0])
+	{
+		p = std::fmod(std::atof(e), 1.0);
+		if (p < 0.0)
+			p += 1.0;
+	}
+	const int q = int(std::round(p * 1000.0)) % 1000;
+	if (!force && q == moon_phase_q && dim == moon_dim_last)
 		return;
-	minute_deg = m;
-	hour_deg = h;
-	model.DirtyVariable("minute_deg");
-	model.DirtyVariable("hour_deg");
+	moon_phase_q = q;
+	moon_dim_last = dim;
+	const double lit = (1.0 - std::cos(2.0 * M_PI * p)) * 0.5;
+	char m_buf[64], s_buf[64];
+	std::snprintf(m_buf, sizeof m_buf, "gen:moonphase?p=%.3f&dim=%d", p, dim ? 1 : 0);
+	std::snprintf(s_buf, sizeof s_buf, "gen:shimmer?lit=%.3f&dim=%d", lit, dim ? 1 : 0);
+	moon_src = m_buf;
+	shimmer_src = s_buf;
+	moon_phase_name = moon_phase_label(p);
+	model.DirtyVariable("moon_src");
+	model.DirtyVariable("shimmer_src");
+	model.DirtyVariable("moon_phase_name");
 }
 
 void App::tick()
 {
-	tick_clock();
-	if (leaving && system->GetElapsedTime() - leave_at >= 0.22)
+	tick_moon(false);
+	tick_stick();
+	if (leaving && system->GetElapsedTime() - leave_at >= 0.20)
 		go_now(next_screen);
 	{
 		std::lock_guard<std::mutex> lock(picked_mutex);
@@ -1375,7 +1686,7 @@ void App::tick()
 			modified |= t.find("--accept-modified") != std::string::npos || t.rfind("warning:", 0) == 0;
 			if (t.find("--accept-modified") != std::string::npos)    // the command-line advice; the switch above is the launcher's way
 				t = "The dump differs from the supported version. Turn on \"Use a modified dump\" to build it anyway.";
-			if (!t.empty() && t.rfind("setup:", 0) != 0 && t.rfind("Start the game:", 0) != 0)    // wtbuild's closing lines are not checks
+			if (!t.empty() && t.rfind("setup:", 0) != 0 && t.rfind("Start the game:", 0) != 0)    // mrbuild's closing lines are not checks
 				checks.push_back({t, "", "done"});
 		}
 		if (modified && !dump_modified)
@@ -1413,16 +1724,16 @@ void App::tick()
 					build_error += (build_error.empty() ? "" : " ") + l.substr(std::min(l.size(), l.find_first_not_of(' ')));
 				after |= l.find("FAILED") != std::string::npos;
 			}
-			for (const std::string& l : runner.lines)       // else wtbuild's own reason (its die(): "wtbuild: ..."), as the textures fail
-				if (const size_t at = l.find("wtbuild: "); build_error.empty() && at != std::string::npos)
+			for (const std::string& l : runner.lines)       // else mrbuild's own reason (its die(): "mrbuild: ..."), as the textures fail
+				if (const size_t at = l.find("mrbuild: "); build_error.empty() && at != std::string::npos)
 					build_error = l.substr(at + 9);
 			if (build_error.empty())
 				build_error = !built_game ? "The texture conversion was stopped. Settings goes on with it."
 					: runner.failed.empty() ? "The build was stopped." : "The " + runner.failed + " step failed; see build/logs.";
 		}
 		else if (built_game)
-			std::ofstream(paths.build + "/" BUILT_VERSION, std::ios::binary) << WT_VERSION;
-		else                                         // #158: made, but without the files that do not decode: wtbuild's warning
+			std::ofstream(paths.build + "/" BUILT_VERSION, std::ios::binary) << MR_VERSION;
+		else                                         // #158: made, but without the files that do not decode: mrbuild's warning
 			for (const std::string& l : runner.lines)
 				if (const size_t at = l.find("warning: "); at != std::string::npos)
 					build_error = l.substr(at + 9);
@@ -1492,8 +1803,8 @@ void App::play()
 	{
 		play_only = false;                       // the launcher stays until the game matches it
 		go("build");
-		build_error = runner.running() ? "This game was built by an older version. Stop the texture conversion, then press REBUILD."
-			: "This game was built by an older version. Press REBUILD to update it.";
+		build_error = runner.running() ? "This game was built by an older version. Stop the texture conversion, then press Rebuild."
+			: "This game was built by an older version. Press Rebuild to update it.";
 		model.DirtyVariable("build_error");
 		return;
 	}
@@ -1510,7 +1821,8 @@ void App::play()
 		status_bad = true;
 		status_title = "NOT READY";
 		status_line = g.error;
-		for (const char* v : {"status_bad", "status_title", "status_line"})
+		menu_desc = g.error;
+		for (const char* v : {"status_bad", "status_title", "status_line", "menu_desc"})
 			model.DirtyVariable(v);
 		return;
 	}

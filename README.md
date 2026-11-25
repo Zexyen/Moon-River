@@ -37,7 +37,7 @@ Everything derived from your dump is generated locally into `targets/`, `build/`
   button prompt & action-ring rotation fixes.
 - **Cutscene stability fixes**: safely releases and rebinds actors deleted mid-cutscene while respecting package unload
   countdowns.
-- **Single-window SDL3 + RmlUi launcher** (`launcher/`) plus single-binary Rust build tool (`tools/wtbuild`) with zero
+- **Single-window SDL3 + RmlUi launcher** (`launcher/`) plus single-binary Rust build tool (`tools/mrbuild`) with zero
   Python dependency.
 
 ## Requirements
@@ -50,34 +50,34 @@ Everything derived from your dump is generated locally into `targets/`, `build/`
 
 ## Quick Start
 
-### 1. Build `wtbuild`
+### 1. Build `mrbuild`
 
 ```bash
-cargo build --release --manifest-path tools/wtbuild/Cargo.toml
+cargo build --release --manifest-path tools/mrbuild/Cargo.toml
 ```
 
 ### 2. Recompile your Bayonetta 2 dump
 
 ```bash
-./tools/wtbuild/target/release/wtbuild setup --dump /path/to/your/bayonetta2/dump
+./tools/mrbuild/target/release/mrbuild setup --dump /path/to/your/bayonetta2/dump
 ```
 
-`wtbuild setup` verifies your dump, converts NSOs to ELFs, applies any mods in `mods/`, extracts SDK 3.6.0 / NVN tables
+`mrbuild setup` verifies your dump, converts NSOs to ELFs, applies any mods in `mods/`, extracts SDK 3.6.0 / NVN tables
 and lifts pure SDK routines, lifts `main.elf` to C with Bayonetta 2's post-lift patches, compiles everything in
-parallel, and links `build/game.so`, `build/libwitchtime.so`, and `build/witch-time-game`.
+parallel, and links `build/game.so`, `build/libmoonriver.so`, and `build/moon-river-game`.
 
 ### 3. Build the launcher (optional)
 
 ```bash
 cmake -S launcher -B build/launcher -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build/launcher
-./build/recomp-launcher
+./build/moon-river-launcher
 ```
 
 ### 4. Run directly from the command line
 
 ```bash
-WT_ROMFS="$PWD/targets/romfs" ./build/witch-time-game targets/exefs/main.elf
+MR_ROMFS="$PWD/targets/romfs" ./build/moon-river-game targets/exefs/main.elf
 ```
 
 Press **F1** (or **Start + Select** on a controller) in-game to open the PC Settings panel.
@@ -87,7 +87,7 @@ Press **F1** (or **Start + Select** on a controller) in-game to open the PC Sett
 | Path | Description |
 |---|---|
 | `games/bayonetta2/` | Bayonetta 2 v1.2 dump hashes, SDK 3.6.0 lift roots, frame-counter & smoothing tables, Rust post-lift patcher (`post_lift.rs`), and game shim helpers (`game_shim_eh.c`). |
-| `tools/wtbuild/` | Standalone Rust build tool (dump check, NSO→ELF, SDK/NVN table & proc discovery, AArch64→C lifter, parallel compiler, linker). |
+| `tools/mrbuild/` | Standalone Rust build tool (dump check, NSO→ELF, SDK/NVN table & proc discovery, AArch64→C lifter, parallel compiler, linker). |
 | `runtime/` | Shared Switch HLE runtime (`nn::*` services, NVN→Vulkan/GL renderer, audio, SDL3 input, PC settings menu). |
 | `launcher/` | C++17 SDL3 + RmlUi launcher UI. |
 | `tests/`, `tools/lifter-check/` | Unit tests and Unicorn-based lifter verification. |

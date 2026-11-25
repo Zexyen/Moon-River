@@ -1,4 +1,4 @@
-/* [witchtime] SHA-1 and MD5 for the CryptoAPI subset of plat_posix.c (the game hashes with nn::crypto's Sha1Generator
+/* [moonriver] SHA-1 and MD5 for the CryptoAPI subset of plat_posix.c (the game hashes with nn::crypto's Sha1Generator
  * and Md5Generator, nnmisc.c), so the runtime needs no libcrypto. Incremental, and the digest can be read while hashing
  * goes on (CryptGetHashParam may be asked more than once). Checked against OpenSSL by tests/plat_hash_test.c. */
 #ifndef PLAT_HASH_H

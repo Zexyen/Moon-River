@@ -17,7 +17,7 @@ typedef struct {
 int  nnpad_button_prompts(void);                /* [Recomps#1] [general] button_prompts: 1 switch, 2 playstation, 3 xbox, 4 keyboard (auto resolved) */
 void nnpad_prompts_used(int keyboard);          /* player 1 used a pad (0) or the keyboard / mouse (1): button_prompts = auto follows */
 int  nnpad_prompts_by_letter(void);             /* [Recomps#1] finding 148: player 1's face buttons by printed letter (A = the bottom button) */
-int  nnpad_menu_swapped(void);                  /* [witchtime] [general] swap_confirm, for the device in use: menus confirm with B, back with A */
+int  nnpad_menu_swapped(void);                  /* [moonriver] [general] swap_confirm, for the device in use: menus confirm with B, back with A */
 int  nnpad_init(void);                           /* SDL up (no video, no window); 0 = failed. Also loads controllers.ini. */
 void nnpad_poll(int force);                      /* hot-plug, config reload; cheap when called often (at most once per ms) */
 int  nnpad_present(int player);                  /* a device is assigned to this player slot */
@@ -28,7 +28,7 @@ int  nnpad_keyboard_player(void);                /* 0..7, -1 = nobody; fixed onc
 #define KB_N 25
 int  nnpad_kb_vk(int idx);                       /* configured virtual key: 0..15 = Pro buttons, 16..19 = left stick left/up/right/down, 20..23 = right stick, 24 = walk; 0 = unbound */
 int  nnpad_key_vk(const char *name);             /* one key name of controllers.ini (W, SPACE, LSHIFT, MOUSE1, ...) -> virtual key, 0 = unknown */
-int  nnpad_tool(int argc, char **argv);          /* --pad-test / --pad-map <n> / WT_PAD_TEST: returns the exit code, or -1 if this is no tool request */
+int  nnpad_tool(int argc, char **argv);          /* --pad-test / --pad-map <n> / MR_PAD_TEST: returns the exit code, or -1 if this is no tool request */
 
 /* self-test hooks implemented by nnhid.c (they call the handlers the game calls) */
 typedef struct {

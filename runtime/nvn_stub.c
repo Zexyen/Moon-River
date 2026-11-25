@@ -1,7 +1,7 @@
 /* Graphics entry points: hands out a host function for every NVN name the game asks for.
  * Device information, memory pools and buffers are here; everything else is in nvn_gl.c (OpenGL).
  * A name that neither implements is MISSING: it is announced when the game fetches it, and calling it stops the game with
- * the function's name (WT_NVN_MISSING=warn: report the call, answer 0 and go on, for exploration). The audit of all names
+ * the function's name (MR_NVN_MISSING=warn: report the call, answer 0 and go on, for exploration). The audit of all names
  * is plan\phases\G1_nvn_audit.md (python nvn_audit.py). */
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +24,7 @@ static void log_call(Ctx *c) {
 /* An entry point with no implementation. */
 static int missing_warn_only(void) {
     static int mode = -1;
-    if (mode < 0) { const char *e = getenv("WT_NVN_MISSING"); mode = e && !strcmp(e, "warn"); }
+    if (mode < 0) { const char *e = getenv("MR_NVN_MISSING"); mode = e && !strcmp(e, "warn"); }
     return mode;
 }
 static void nvn_generic(Ctx *c) {
@@ -33,7 +33,7 @@ static void nvn_generic(Ctx *c) {
            (unsigned long long)c->x[2], (unsigned long long)c->x[3], 10);
     fflush(stdout);
     if (!missing_warn_only()) {
-        printf("nvn: stopping: %s has no implementation (WT_NVN_MISSING=warn to continue with a zero answer)%c", hostfn_current_name(), 10);
+        printf("nvn: stopping: %s has no implementation (MR_NVN_MISSING=warn to continue with a zero answer)%c", hostfn_current_name(), 10);
         fflush(stdout);
         report_and_exit(6);
     }
@@ -41,7 +41,7 @@ static void nvn_generic(Ctx *c) {
 }
 /* nvnDeviceGetInteger(device, pname, int *out): device capabilities.
  * [Recomps#1] 2026-10-17: the answers come from the player's own sdk. Its NVN code answers most pnames with a fixed
- * number; `wtbuild tables` (tools/wtbuild/src/tables.rs) reads those out of targets/exefs/sdk.elf into gen/nvn_devinfo.h (generated on the
+ * number; `mrbuild tables` (tools/mrbuild/src/tables.rs) reads those out of targets/exefs/sdk.elf into gen/nvn_devinfo.h (generated on the
  * player's PC, never published), and they are used first. This file only holds what the sdk does not answer with a
  * fixed number (it reads its live device object for them) plus, as documented fallback, the publicly sourced values of
  * the parameters the game asks for. Every other pname answers 0 and is counted (print_devinfo_summary, and a trace line
@@ -56,7 +56,7 @@ static void nvn_generic(Ctx *c) {
  *   OPEN not sourced yet (notes/release-audit.md section 5) */
 #include "nvn_devinfo.h"                                /* gen/: nvn_devinfo_sdk[pname], -1 = no fixed answer in the sdk */
 static const int g_devinfo[0x58] = {
-    /* [witchtime] API version, when the sdk table has no answer (B3's sdk 13.3.2): Bayonetta 3 accepts major 55 and minor 12
+    /* [moonriver] API version, when the sdk table has no answer (B3's sdk 13.3.2): Bayonetta 3 accepts major 55 and minor 12
      * or more ([game] 0x7100d176c8: cmp w8, #0x37 / cmp w8, #0xc, b.lt), the NVN its headers were built with */
     [0x00] = 55, [0x01] = 12,
     /* the sdk answers from its live device object: */
@@ -101,14 +101,14 @@ void print_devinfo_summary(FILE *out) {
 /* ---- memory pools and buffers: the game supplies the memory, so mapping must work for real.
  * Guest objects are opaque; what each one refers to is kept in a side table keyed by address. */
 typedef struct NvnObj { uint64_t key, memory, size, pool, offset, flags; struct NvnObj *next; } NvnObj;
-/* [witchtime] 65536 chains, picked by the product's high bits (were 4096 by its low 12 bits, which only the key's own
+/* [moonriver] 65536 chains, picked by the product's high bits (were 4096 by its low 12 bits, which only the key's own
  * bits 3..14 reach: 40,000 buffers that lie at a regular stride shared a few hundred chains, and nobj walked them) */
 #define NOBJ_N 65536
 #define NOBJ_HASH(key) ((unsigned)((uint32_t)(((key) >> 3) * 2654435761u) >> 16))
 static NvnObj *g_objs[NOBJ_N];
 static SRWLOCK g_objs_lock = SRWLOCK_INIT;
-static NvnObj *g_objs_free;                                             /* [witchtime] dropped entries, reused (never freed: see nobj) */
-/* [witchtime] Lookups take no lock: B3's main thread and three job threads ask for buffers' pools, flags and addresses all the
+static NvnObj *g_objs_free;                                             /* [moonriver] dropped entries, reused (never freed: see nobj) */
+/* [moonriver] Lookups take no lock: B3's main thread and three job threads ask for buffers' pools, flags and addresses all the
  * time (nvnBufferGetMemoryPool / nvnMemoryPoolGetFlags / nvnBufferGetAddress from 7100d0b7d0), thousands at once in the frame a
  * scene comes back after a pause (85-90 ms in Tokyo, the threads waiting for each other at this lock). An entry is published
  * with a release store at its chain's head; a dropped one is unlinked and kept for reuse, never freed, so a reader on a chain
@@ -138,7 +138,7 @@ static void nobj_drop(uint64_t key) {                                   /* the o
         if ((*pp)->key == key) { NvnObj *o = *pp; __atomic_store_n(pp, o->next, __ATOMIC_RELEASE); o->next = g_objs_free; g_objs_free = o; break; }
     ReleaseSRWLockExclusive(&g_objs_lock);
 }
-/* [witchtime] issues 132, 133: the NVN buffer that holds a GPU address: the bound of an index buffer whose indices a compute
+/* [moonriver] issues 132, 133: the NVN buffer that holds a GPU address: the bound of an index buffer whose indices a compute
  * dispatch chooses (draw records written on the GPU). A locked walk over every object (tens of thousands, about 0.5 ms):
  * nvn_vk_draw.c keeps the answer and checks it with nvn_stub_buffer_still. 1 = found (*key: the buffer object). */
 int nvn_stub_buffer_of(uint64_t addr, uint64_t *key, uint64_t *base, uint64_t *size) {

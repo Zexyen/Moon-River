@@ -29,7 +29,7 @@
  * the heap size directly). The heap is one host region, committed up front: guest code touches it directly. */
 #define MEMORY_BLOCK_UNIT 0x200000ull                    /* [doc] nn::os::MemoryBlockUnitSize */
 #define RESULT_OS_OUT_OF_MEMORY 0xca01ull                /* [doc] os module 1, description 101 (NOT VERIFIED against our sdk) */
-/* [witchtime] 3285 MB, the application memory of a console in its default arrangement: Bayonetta 3 sizes its heap from this
+/* [moonriver] 3285 MB, the application memory of a console in its default arrangement: Bayonetta 3 sizes its heap from this
  * and then takes 3028 MB of blocks out of it (B2's 3 GB left the last one, the 262 MB frame-buffer heap, out)
  * shortcut: the documented figure, not read from a console; adjust if a later block does not fit */
 static uint64_t g_total_available = 0xcd500000ull;
@@ -39,7 +39,7 @@ static SRWLOCK g_heap_lock = SRWLOCK_INIT;
 
 static uint64_t used_memory(void) { return IMAGE_SIZE + 0x100000ull; }   /* program image + main thread stack */
 
-/* [witchtime] RECOMPS_ASPECT / RECOMPS_UW_WIDTH wider than 16:9: the render-target heap, 0x10400000, grows with the
+/* [moonriver] RECOMPS_ASPECT / RECOMPS_UW_WIDTH wider than 16:9: the render-target heap, 0x10400000, grows with the
  * width; the game is told it has as much more memory (it sizes its heap from this; the blocks it takes are fixed) */
 static uint64_t aspect_extra(void) {
     const char *e = getenv("RECOMPS_ASPECT");
@@ -79,7 +79,7 @@ static void os_SetMemoryHeapSize(Ctx *c) {
         if (size) {
             /* MEM_WRITE_WATCH: the renderer asks the OS which texture pages the game wrote (nvn_gl.c ww_newest). Without it
              * every texture in this heap was hashed in full every batch: 40-54 MB, 2-4 ms of the render thread per frame in
-             * a fight (finding 88). WT_NO_WRITEWATCH=1 (nvn_gl.c) still turns the use of it off. */
+             * a fight (finding 88). MR_NO_WRITEWATCH=1 (nvn_gl.c) still turns the use of it off. */
             g_heap = VirtualAlloc(NULL, (SIZE_T)size, MEM_RESERVE | MEM_COMMIT | MEM_WRITE_WATCH, PAGE_READWRITE);
             if (!g_heap) g_heap = VirtualAlloc(NULL, (SIZE_T)size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
             if (g_heap) { g_heap_size = size; void watch_heap_created(uint64_t); void watch_heap_bounds(uint64_t, uint64_t); watch_heap_bounds((uint64_t)(uintptr_t)g_heap, size); watch_heap_created((uint64_t)(uintptr_t)g_heap); }
