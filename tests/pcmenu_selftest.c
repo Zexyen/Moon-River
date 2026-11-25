@@ -120,6 +120,11 @@ int main(int argc, char **argv) {
     change(asr, 1, 0); assert(!strcmp(k_rows[asr].val[g_cur[asr]], "stretch") && gfx_options()->aspect_stretch == 1 && !row_restart(asr));
     change(asr, 1, 0); assert(!strcmp(k_rows[asr].val[g_cur[asr]], "wide") && gfx_options()->aspect_stretch == 0 && row_restart(asr));
     change(asr, -1, 0); change(asr, -1, 0); assert(!strcmp(k_rows[asr].val[g_cur[asr]], "keep") && !row_restart(asr));
+    /* hud_area: live toggle between Centered (16:9) and Full screen */
+    int hdr_row = row_of("hud_area");
+    assert(hdr_row >= 0 && !strcmp(k_rows[hdr_row].val[g_cur[hdr_row]], "screen") && gfx_options()->hud_centre == 0 && !row_restart(hdr_row));
+    change(hdr_row, -1, 0); assert(!strcmp(k_rows[hdr_row].val[g_cur[hdr_row]], "16:9") && gfx_options()->hud_centre == 1 && !row_restart(hdr_row));
+    change(hdr_row, 1, 0); assert(!strcmp(k_rows[hdr_row].val[g_cur[hdr_row]], "screen") && gfx_options()->hud_centre == 0 && !row_restart(hdr_row));
     g_sel = rs; g_ver++;
     panel(dir, "pcmenu_1280x720", 1280, 720);
     panel(dir, "pcmenu_3840x2160", 3840, 2160);

@@ -4260,7 +4260,8 @@ static void uw_cap_draw(void) {
     printf("UWCAP vs#%d fs#%d na%d attrs", R.prog[0] ? R.prog[0]->serial : -1, R.prog[1] ? R.prog[1]->serial : -1, R.nattr);
     for (int i = 0; i < R.nattr && i < 16; i++) if (R.vattr[i] & 0xff) printf(" %d:%x+%u", i, R.vattr[i] & 0xff, R.vattr[i] >> 14 & 0xffff);
     printf(" stride %u vp %g,%g,%g,%g sc %d,%d,%d,%d(%d) tgt %d", R.vstream[0].stride, R.viewport[0], R.viewport[1], R.viewport[2], R.viewport[3], R.scissor[0], R.scissor[1], R.scissor[2], R.scissor[3], R.have_scissor, R.ncol && R.col[0].tex ? (int)R.col[0].tex->b.width : 0);
-    if (R.vbuf[0].addr && R.vbuf[0].size >= 16) { const float *v = P(R.vbuf[0].addr); printf(" v0 %g,%g,%g,%g", v[0], v[1], v[2], v[3]); }
+    if (R.vbuf[0].addr && R.vbuf[0].size >= 16) { const float *v = P(R.vbuf[0].addr); printf(" v0 %g,%g,%g,%g", v[0], v[1], v[2], v[3]); if (R.vstream[0].stride == 48 && R.vbuf[0].size >= 24) printf(" uv0 %g,%g", v[4], v[5]); }
+    { Tex *t; View tv; SamplerParams sp; if (tex_lookup(1, 0, &t, &tv, &sp) & 1) printf(" t0 %dx%d(g%d)", t->b.width, t->b.height, t->gpu_written); }
     for (int n = 0; n < 16; n++) if (R.ubo[0][n].addr && R.ubo[0][n].size >= 32) { const float *q = P(R.ubo[0][n].addr); printf(" | u%d %g %g %g %g %g %g %g %g", n, q[0], q[1], q[2], q[3], q[4], q[5], q[6], q[7]); if (n == 4 && R.ubo[0][n].size >= 128) printf(" [16] %g %g %g %g %g %g %g %g", q[16], q[17], q[18], q[19], q[20], q[21], q[22], q[23]); }
     for (int n = 0; n < 16; n++) if (R.prog[1] && R.ubo[1][n].addr && R.ubo[1][n].size >= 32) { const float *q = P(R.ubo[1][n].addr); printf(" | f%d", n); for (int i = 0; i < 16 && i * 4 < (int)R.ubo[1][n].size; i++) printf(" %g", q[i]); }
     printf("\n");
@@ -5098,6 +5099,8 @@ static int64_t g_uw_vlo;
 static int g_uw_on;                               /* 0 nothing swapped, else 1 + the uniform block index swapped */
 static uint8_t g_uw_fx[4096][256];                /* effect blocks: fresh address per draw (ring_put caches by address within a batch) */
 static unsigned g_uw_fxn;
+static uint8_t g_uw_cam[32][4096];                /* 3D camera-locked backdrop camera blocks (c4: View + Proj) */
+static unsigned g_uw_camn;
 static float g_uw_bars;                           /* screen width of a movie draw just prepared: its sides are cleared black */
 
 /* Update a host-side scratch buffer that buf_ref streams into R.ring: invalidate R.acache whenever its bytes change so
@@ -5136,6 +5139,23 @@ static int uw_vrange(const Cmd *m, int indexed, uint64_t *lo, uint64_t *hi) {
     *hi = (uint64_t)hi_s;
     return 1;
 }
+static int uw_is_screen_tex(const Tex *t, int W) {
+    if (!t || t->dead || !t->gpu_written || t->b.width <= 0 || t->b.height <= 0) return 0;
+    int tw = t->b.width;
+    return abs(tw - W) <= 1 || abs(tw - W / 2) <= 1 || abs(tw - W / 4) <= 1;
+}
+static int uw_has_screen_tex(int W) {
+    VStage *fs = R.prog[1] ? (VStage *)R.prog[1]->st[1].vk : NULL;
+    Tex *t; View v; SamplerParams sp;
+    if (fs && fs->nsmp > 0) {
+        for (int i = 0; i < fs->nsmp; i++) {
+            unsigned u = fs->smp[i].unit;
+            if (u < 32 && (tex_lookup(1, u, &t, &v, &sp) & 1) && uw_is_screen_tex(t, W)) return 1;
+        }
+        return 0;
+    }
+    return (tex_lookup(1, 0, &t, &v, &sp) & 1) && uw_is_screen_tex(t, W);
+}
 static int uw_fx_begin(const Cmd *m, int indexed) {
     {   /* the screen-copy pass (Panther Within's zoom blur): unit quad, float3 at stride 12, its 4x4 in block 8 */
         const Range *b = &R.ubo[0][8];
@@ -5173,7 +5193,7 @@ static int uw_fx_begin(const Cmd *m, int indexed) {
     }
     float span = (x1 - x0) * W / 2560.0f;
     if (uw_log_on() && y0 <= -0.98f && y1 >= 0.98f) { static int n; if (n++ < 40) printf("UWFXQ f%lld vs#%d fs#%d x %.3f..%.3f y %.3f..%.3f span %.3f\n", nvn_front_frame_next(), R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1, x0, x1, y0, y1, span); }
-    if (y0 > -0.98f || y1 < 0.98f || fabsf(x0 + x1) > 0.06f || span < 0.85f || span > 1.3f) return 0;
+    if (y0 > -0.98f || y1 < 0.98f || fabsf(x0 + x1) > 0.06f || span < 0.85f || (x0 <= -0.995f && x1 >= 0.995f)) return 0;
     if (q[0] == 1.0f && q[1] == 1.0f && q[2] == 1.0f && fabsf(q[21] - 2.0f) < 1e-4f && fabsf(q[19] * W - 1280.0f) < 1.0f) { g_uw_bars = W; return 0; }
     uint8_t tmp[256];
     memcpy(tmp, q, (size_t)u->size);
@@ -5184,9 +5204,70 @@ static int uw_fx_begin(const Cmd *m, int indexed) {
     R.ubo[0][4].addr = (uint64_t)(uintptr_t)p;
     return 1;
 }
+static int uw_3d_backdrop_begin(const Cmd *m, int indexed) {
+    /* Camera-locked 3D backdrop quads (e.g. Angel Book cathedral hallway, drawn in both Z-prepass and color pass):
+     * c4 (R.ubo[0][1]) holds row-major View[0..15] + Proj[16..31], c5 (R.ubo[0][2]) holds row-major Model 3x4.
+     * When R_view * R_model ~= I and the planar mesh fills screen height at ~16:9 width, widen Proj row 0 by W/1280. */
+    float W = (float)g_rs_bw;
+    if (W < 1281.0f || fabsf(R.viewport[2] - W) > 0.5f || fabsf(R.viewport[3] - 720.0f) > 0.5f) return 0;
+    if ((R.vattr[0] & 0xff) != 0x22 || (R.vattr[0] >> 8 & 31) != 0 || (R.vattr[0] >> 14 & 0xffff) != 0) return 0;
+    uint32_t stride = R.vstream[0].stride;
+    if (stride < 12 || !R.vbuf[0].addr) return 0;
+    const Range *u1 = &R.ubo[0][1], *u2 = &R.ubo[0][2];
+    if (!u1->addr || u1->size < 128 || u1->size > sizeof g_uw_cam[0] || !u2->addr || u2->size < 48) return 0;
+    const float *V = (const float *)P(u1->addr), *Pm = V + 16, *M = (const float *)P(u2->addr);
+    if (Pm[0] <= 0.1f || Pm[5] <= 0.1f || fabsf(Pm[1]) > 1e-4f || fabsf(Pm[4]) > 1e-4f ||
+        fabsf(Pm[12]) > 1e-4f || fabsf(Pm[13]) > 1e-4f || fabsf(Pm[14] + 1.0f) > 0.05f || fabsf(Pm[15]) > 1e-4f) return 0;
+    if (fabsf(M[3]) + fabsf(M[7]) + fabsf(M[11]) <= 0.01f) return 0;
+    float VM[12];
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+            float s = V[r * 4 + 0] * M[c] + V[r * 4 + 1] * M[4 + c] + V[r * 4 + 2] * M[8 + c];
+            if (fabsf(s - (r == c ? 1.0f : 0.0f)) > 0.005f) return 0;
+            VM[r * 4 + c] = s;
+        }
+        VM[r * 4 + 3] = V[r * 4 + 0] * M[3] + V[r * 4 + 1] * M[7] + V[r * 4 + 2] * M[11] + V[r * 4 + 3];
+    }
+    uint64_t lo, hi;
+    if (!uw_vrange(m, indexed, &lo, &hi) || hi - lo > 1024 || hi * stride > R.vbuf[0].size) return 0;
+    float nx0 = 1e30f, nx1 = -1e30f, ny0 = 1e30f, ny1 = -1e30f, vz0 = 1e30f, vz1 = -1e30f;
+    for (uint64_t i = lo; i < hi; i++) {
+        const float *v = (const float *)((const uint8_t *)P(R.vbuf[0].addr) + i * stride);
+        float vx = VM[0] * v[0] + VM[1] * v[1] + VM[2] * v[2] + VM[3];
+        float vy = VM[4] * v[0] + VM[5] * v[1] + VM[6] * v[2] + VM[7];
+        float vz = VM[8] * v[0] + VM[9] * v[1] + VM[10] * v[2] + VM[11];
+        if (vz >= -0.1f) return 0;
+        float cx = Pm[0] * vx + Pm[1] * vy + Pm[2] * vz + Pm[3];
+        float cy = Pm[4] * vx + Pm[5] * vy + Pm[6] * vz + Pm[7];
+        float cw = Pm[12] * vx + Pm[13] * vy + Pm[14] * vz + Pm[15];
+        if (cw <= 0.05f) return 0;
+        float nx = cx / cw, ny = cy / cw;
+        if (nx < nx0) nx0 = nx; if (nx > nx1) nx1 = nx;
+        if (ny < ny0) ny0 = ny; if (ny > ny1) ny1 = ny;
+        if (vz < vz0) vz0 = vz; if (vz > vz1) vz1 = vz;
+    }
+    if (ny0 > -0.95f || ny1 < 0.95f || (nx0 <= -0.995f && nx1 >= 0.995f)) return 0;
+    if (vz1 - vz0 >= 0.5f * (-vz0)) return 0;
+    float scale = W / 1280.0f, sx0 = nx0 * scale, sx1 = nx1 * scale;
+    int full = sx0 < -0.85f && sx1 > 0.85f && fabsf(sx0 + sx1) < 0.30f;
+    int lhalf = sx0 < -0.85f && fabsf(sx1) < 0.25f;
+    int rhalf = sx1 > 0.85f && fabsf(sx0) < 0.25f;
+    if (!full && !lhalf && !rhalf) return 0;
+    uint8_t tmp[4096];
+    memcpy(tmp, V, (size_t)u1->size);
+    ((float *)tmp)[16] *= scale; ((float *)tmp)[17] *= scale;
+    ((float *)tmp)[18] *= scale; ((float *)tmp)[19] *= scale;
+    uint8_t *p = g_uw_cam[g_uw_camn++ & 31];
+    uw_write_cached(p, tmp, (size_t)u1->size);
+    g_uw_keep = *u1; g_uw_on = 1 + 1;
+    R.ubo[0][1].addr = (uint64_t)(uintptr_t)p;
+    if (uw_log_on()) { static int n; if (n++ < 40) printf("UW3D f%lld vs#%d fs#%d nx %.3f..%.3f ny %.3f..%.3f vz %.2f..%.2f scale %.4f\n", nvn_front_frame_next(), R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1, nx0, nx1, ny0, ny1, vz0, vz1, scale); }
+    return 1;
+}
 static void uw2d_begin(const Cmd *m, int indexed) {
     if (g_rs_bw <= 1280 || !R.prog[0]) return;
     if (uw_fx_begin(m, indexed)) return;
+    if (uw_3d_backdrop_begin(m, indexed)) return;
     if (R.nattr < 9) return;
 #define UW_F4(i, off) ((R.vattr[i] & 0xff) == 0x2e && (R.vattr[i] >> 8 & 31) == 0 && (R.vattr[i] >> 14 & 0xffff) == (off))
     if (!UW_F4(0, 0) || !UW_F4(5, 16) || !UW_F4(8, 32) || R.vstream[0].stride != 48) return;
@@ -5212,32 +5293,73 @@ static void uw2d_begin(const Cmd *m, int indexed) {
         int f = 0; for (int i = 0; i < ns; i++) if (!strcmp(seen[i], kk)) { f = 1; break; }
         if (!f && ns < 4096 && (x1 - x0 > 900 || x0 > 1279.0f || x1 < 1.0f || fabsf(R.viewport[2] - W) > 0.5f)) { strcpy(seen[ns++], kk); printf("UW2D f%lld %s\n", nvn_front_frame_next(), kk); }
     }
-    int k;
+    static long long g_uw_bg_frame = -1;
+    static int g_uw_menu_bg = 0;
+    {
+        long long f = nvn_front_frame_next();
+        if (f != g_uw_bg_frame) { g_uw_bg_frame = f; g_uw_menu_bg = 0; }
+    }
+    int k = -1;
     int onscreen = fabsf(R.viewport[2] - W) <= 0.5f && !(R.ncol && R.col[0].tex && fabsf((float)R.col[0].tex->b.width - W) > 0.5f);
     if (!onscreen) k = 1;
-    else if (x1 - x0 > 1150.0f && x1 - x0 < 1400.0f && fabsf(x0 + x1 - 1280.0f) < 40.0f) k = 1;
-    else if (x0 < 1.0f && x1 > W - 1.0f && y0 < 1.0f && y1 > 719.0f) k = 0;
-    else if ((fabsf(w[3] - 1280.0f) < 0.5f && x1 > 1279.0f && x1 < 1281.0f && x0 > 320.0f && 1280.0f - x0 > 1.0f) || (x1 > 1300.0f && x0 > 320.0f && x0 < 1260.0f)) k = 2;
-    else if (x0 < -20.0f && x1 > 20.0f && x1 < 960.0f) k = 5;
+    else if (fabsf(x0 + x1 - 1280.0f) < 40.0f && ((x1 - x0 > 1150.0f && x1 - x0 < 1400.0f) || (x1 - x0 >= 1400.0f && x1 - x0 < W - 1.0f && y0 <= 10.0f && y1 >= 710.0f))) { if (y0 <= 10.0f && y1 >= 710.0f) g_uw_menu_bg = 1; k = 1; }
+    else if (fabsf(x0 + x1 - 1280.0f) < 40.0f && x1 - x0 >= W - 1.0f && y0 <= 10.0f && y1 >= 710.0f) { g_uw_menu_bg = 1; return; }
+    else if (x0 < 1.0f && x1 > W - 1.0f && y0 < 1.0f && y1 > 719.0f) { g_uw_menu_bg = 1; k = 0; }
+    else if ((fabsf(w[3] - 1280.0f) < 0.5f && x1 > 1279.0f && x1 < 1281.0f && x0 > 320.0f && 1280.0f - x0 > 1.0f) || (x1 > 1300.0f && x0 > 320.0f && x0 < 1260.0f && y1 - y0 >= 200.0f)) { g_uw_menu_bg = 1; k = 2; }
+    else if ((fabsf(w[3]) < 0.5f && x0 > -1.0f && x0 < 1.0f && x1 > 1.0f && x1 < 960.0f) || (x0 < -20.0f && x1 > 20.0f && x1 < 960.0f && y1 - y0 >= 200.0f)) { g_uw_menu_bg = 1; k = 5; }
     else if (w[3] > 1280.5f && w[3] < 1280.0f + (W - 1280.0f) * 0.25f) k = 3;
     else {
+        int wide_hud = !gfx_options()->hud_centre && !g_uw_menu_bg;
         int wbased = w[3] > 1280.0f + (W - 1280.0f) * 0.25f && w[3] <= W + 0.5f && y1 < 140.0f;
-        int l = (int)((W - 1280.0f) * 0.5f), sx = R.have_scissor ? R.scissor[0] : 0, sw = R.have_scissor ? R.scissor[2] : (int)W;
-        if (R.have_scissor && !(sx <= 0 && sx + sw >= (int)W)) sx += l;
-        else if (x0 >= 0 && x1 <= 1280.0f && !wbased) return;
-        if (wbased) {
-            float tmp[64];
-            memcpy(tmp, o, (size_t)u[12].size);
-            tmp[0] = 2.0f / W; tmp[1] = tmp[2] = 0; tmp[3] = -1.0f - (W - 1280.0f) / W;
-            uw_write_cached(g_uw_proj[4], tmp, (size_t)u[12].size);
-            g_uw_keep = R.ubo[0][12]; g_uw_on = 1 + 12;
-            R.ubo[0][12].addr = (uint64_t)(uintptr_t)g_uw_proj[4];
+        int has_scr = !wbased && hi - lo <= 64 && x1 - x0 > 1.0f && uw_has_screen_tex((int)(W + 0.5f));
+        if (wide_hud && wbased) {
+            k = 0;
+        } else if (wide_hud && !has_scr && ((x0 < 420.0f && x1 <= 560.0f && y1 <= 240.0f) || (x0 < 240.0f && x1 <= 460.0f && y0 >= 520.0f))) {
+            k = 0;
+        } else if (wide_hud && !has_scr && ((x0 >= 820.0f && y1 <= 440.0f) || (x0 >= 860.0f && y0 >= 520.0f))) {
+            k = 3;
+            if (R.have_scissor && !(R.scissor[0] <= 0 && R.scissor[0] + R.scissor[2] >= (int)W)) {
+                memcpy(g_uw_sc_keep, R.scissor, sizeof g_uw_sc_keep); g_uw_sc_had = R.have_scissor; g_uw_sc = 1;
+                R.scissor[0] += (int)(W - 1280.0f); R.dyn_dirty = 1;
+            }
         }
-        int a0 = sx > l ? sx : l, a1 = sx + sw < l + 1280 ? sx + sw : l + 1280;
-        memcpy(g_uw_sc_keep, R.scissor, sizeof g_uw_sc_keep); g_uw_sc_had = R.have_scissor; g_uw_sc = 1;
-        if (!R.have_scissor) { R.scissor[1] = 0; R.scissor[3] = 720; }
-        R.scissor[0] = a0; R.scissor[2] = a1 > a0 ? a1 - a0 : 0; R.have_scissor = 1; R.dyn_dirty = 1;
-        return;
+        if (k < 0) {
+            if (has_scr) {
+                int match = 1;
+                for (uint64_t i = lo; i < hi; i++) {
+                    const float *v = (const float *)((const uint8_t *)P(R.vbuf[0].addr) + i * 48);
+                    float vx = w[0] * v[0] + w[1] * v[1] + w[2] * v[2] + w[3];
+                    if (fabsf(v[4] - vx / W) > 0.01f) { match = 0; break; }
+                }
+                if (match) {
+                    float tmp[64 * 12];
+                    float du = (W - 1280.0f) * 0.5f / W;
+                    size_t nbytes = (size_t)(hi - lo) * 48;
+                    memcpy(tmp, (const uint8_t *)P(R.vbuf[0].addr) + lo * 48, nbytes);
+                    for (uint64_t i = 0; i < hi - lo; i++) tmp[i * 12 + 4] += du;
+                    uw_write_cached(g_uw_vtx, tmp, nbytes);
+                    g_uw_vkeep = R.vbuf[0]; g_uw_von = 1; g_uw_vlo = (int64_t)lo;
+                    R.vbuf[0].addr = (uint64_t)(uintptr_t)g_uw_vtx; R.vbuf[0].size = nbytes;
+                    if (uw_log_on()) { static int n; if (n++ < 40) printf("UW2DUV f%lld vs#%d fs#%d x %.0f..%.0f y %.0f..%.0f du %.4f\n", nvn_front_frame_next(), R.prog[0]->serial, R.prog[1] ? R.prog[1]->serial : -1, x0, x1, y0, y1, du); }
+                }
+            }
+            int l = (int)((W - 1280.0f) * 0.5f), sx = R.have_scissor ? R.scissor[0] : 0, sw = R.have_scissor ? R.scissor[2] : (int)W;
+            if (R.have_scissor && !(sx <= 0 && sx + sw >= (int)W)) sx += l;
+            else if (x0 >= 0 && x1 <= 1280.0f && !wbased) return;
+            if (wbased) {
+                float tmp[64];
+                memcpy(tmp, o, (size_t)u[12].size);
+                tmp[0] = 2.0f / W; tmp[1] = tmp[2] = 0; tmp[3] = -1.0f - (W - 1280.0f) / W;
+                uw_write_cached(g_uw_proj[4], tmp, (size_t)u[12].size);
+                g_uw_keep = R.ubo[0][12]; g_uw_on = 1 + 12;
+                R.ubo[0][12].addr = (uint64_t)(uintptr_t)g_uw_proj[4];
+            }
+            int a0 = sx > l ? sx : l, a1 = sx + sw < l + 1280 ? sx + sw : l + 1280;
+            memcpy(g_uw_sc_keep, R.scissor, sizeof g_uw_sc_keep); g_uw_sc_had = R.have_scissor; g_uw_sc = 1;
+            if (!R.have_scissor) { R.scissor[1] = 0; R.scissor[3] = 720; }
+            R.scissor[0] = a0; R.scissor[2] = a1 > a0 ? a1 - a0 : 0; R.have_scissor = 1; R.dyn_dirty = 1;
+            return;
+        }
     }
     if (k == 1 && hi - lo <= 64 && onscreen) {
         float u0 = 1e30f, u1 = -1e30f;
