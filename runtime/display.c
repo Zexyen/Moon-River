@@ -470,10 +470,23 @@ void display_quit(void) { if (g_hwnd) PostMessageA(g_hwnd, WM_CLOSE, 0, 0); }   
 #include "nnpad.h"
 static int g_kbm_test;                       /* MR_KBM_SCRIPT set: the window counts as focused (a hidden test window never gets the focus) */
 static int has_focus(SDL_Window *w) { return g_kbm_test || (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS); }
+static volatile LONG g_client_w, g_client_h;         /* window_thread updates on create/apply/resize; GetClientRect reads from any thread */
+static void client_size_update(SDL_Window *w) {
+    int pw = 0, ph = 0;
+    if (w && SDL_GetWindowSizeInPixels(w, &pw, &ph) && pw > 0 && ph > 0) {
+        InterlockedExchange(&g_client_w, (LONG)pw);
+        InterlockedExchange(&g_client_h, (LONG)ph);
+    }
+}
 BOOL GetClientRect(HWND h, RECT *r) {
-    int w = 0, hh = 0;
     memset(r, 0, sizeof *r);
-    if (!h || !SDL_GetWindowSizeInPixels((SDL_Window *)h, &w, &hh)) return FALSE;   /* pixels: what the swapchain needs */
+    if (!h) return FALSE;
+    if (h == g_hwnd) {
+        LONG w = g_client_w, hh = g_client_h;
+        if (w > 0 && hh > 0) { r->right = w; r->bottom = hh; return TRUE; }
+    }
+    int w = 0, hh = 0;
+    if (!SDL_GetWindowSizeInPixels((SDL_Window *)h, &w, &hh)) return FALSE;   /* pixels: what the swapchain needs */
     r->right = w; r->bottom = hh;
     return TRUE;
 }
@@ -637,6 +650,7 @@ static void window_apply(SDL_Window *w) {
     int pw = 0, ph = 0;
     SDL_SyncWindow(w);                                   /* (waits for the compositor, at most about a second) */
     SDL_GetWindowSizeInPixels(w, &pw, &ph);
+    client_size_update(w);
     printf("display: window %s, client %dx%d pixels now%c", go->window_mode ? "desktop fullscreen" : "windowed", pw, ph, 10);
 }
 #ifdef __APPLE__
@@ -690,10 +704,14 @@ static SDL_Window *window_open(void) {
         SDL_SetWindowTitle(w, g_title);
         window_apply(w);
         if (visible) SDL_ShowWindow(w);
-    } else w = SDL_CreateWindow(g_title, go->width, go->height, flags);
+    } else {
+        w = SDL_CreateWindow(g_title, go->width, go->height, flags);
+        if (w && visible && go->window_mode) SDL_SyncWindow(w);      /* Wayland: wait for the compositor's fullscreen configure before swapchain creation */
+    }
     if (!w) { printf("display: the window cannot be made: %s%c", SDL_GetError(), 10); fflush(stdout); ExitProcess(5); }
     int pw = 0, ph = 0;
     SDL_GetWindowSizeInPixels(w, &pw, &ph);
+    client_size_update(w);
     printf("display: window %s, client %dx%d pixels (SDL %s video%s)%c", go->window_mode ? "desktop fullscreen" : "windowed", pw, ph,
            SDL_GetCurrentVideoDriver(), visible ? "" : ", hidden (MR_SHOW=0)", 10);
     {   /* [moonriver] aspect_ratio = auto: the window's shape; borderless / fullscreen: the monitor's (the window may not have its size yet) */
@@ -731,6 +749,12 @@ static void window_event(SDL_Window *w, const SDL_Event *ev) {
             sdl_mouse_update(w);
         }
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F10 && uw_log_env()) uw_touch_capture();   /* developer aid: capture this frame's draws (nvn_vk_draw.c uw_cap_now) */
+        if (e.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED || e.type == SDL_EVENT_WINDOW_RESIZED ||
+            e.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED || e.type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN ||
+            e.type == SDL_EVENT_WINDOW_LEAVE_FULLSCREEN || e.type == SDL_EVENT_WINDOW_MAXIMIZED ||
+            e.type == SDL_EVENT_WINDOW_RESTORED) {
+            client_size_update(w);
+        }
         if (g_apply_ev && e.type == g_apply_ev) { window_apply(w); return; }
         if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {   /* as WM_CLOSE: nn::oe decides */
             printf("\nwindow closed by the user after %lld frames\n", (long long)g_frames);
