@@ -12,7 +12,7 @@ pub use post_lift_impl::post_lift;
 pub const NAME: &str = "bayonetta2";
 
 /// this game's own runtime sources (../runtime), built into the host runtime after the shared ones
-pub const RUNTIME_SOURCES: &[&str] = &[];
+pub const RUNTIME_SOURCES: &[&str] = &["prompts.c"];
 
 /// data the game library exports to the runtime besides the tables every game has (../runtime/game_shim_eh.c)
 pub const EXPORTS: &[&str] = &["game_fsr_w", "game_fsr_h", "game_fsr_phases", "game_mv_pairs"];

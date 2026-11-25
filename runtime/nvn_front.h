@@ -49,6 +49,8 @@ typedef struct Tex {
     void *vk;                              /* the Vulkan back end's record of this texture (nvn_vk_draw.c: VTex), NULL until first used */
     void *prep;                            /* #45: its ASTC decode on tex_prep's threads (nvn_gl.c), render thread's */
     long long ahead_seen;                  /* session 8 (nvn_vk_draw.c tex_ahead): 1 + the frame the render thread first saw this record; -1 = looked at, not taken */
+    int8_t prompt_atlas;                   /* in-game button prompt atlas id (prompts.h), 0 = none */
+    uint64_t prompt_key;                   /* last uploaded prompt state key for this atlas */
 } Tex;
 Tex *nvn_front_tex_first(void);            /* the newest texture record; ->all_next = the one made before it (records are never freed) */
 typedef struct { Tex *tex; View view; } TexPoolEnt;
