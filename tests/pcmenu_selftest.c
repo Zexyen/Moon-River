@@ -29,6 +29,15 @@ const char *nnpad_layout_setting(void) { return g_layout; }
 int nnpad_layout_set(const char *val) { g_layout = val; return 1; }
 int nnpad_button_prompts(void) { return 3; }
 int nnpad_prompts_by_letter(void) { return 1; }
+static unsigned char g_bind[16];
+static int g_bind_on, g_ctrl_type = 1;
+int nnpad_bind_get(unsigned char *out) { if (!g_bind_on) return 0; if (out) memcpy(out, g_bind, 16); return 1; }
+int nnpad_bind_set(const unsigned char *b) {
+    if (!b) { g_bind_on = 0; return 1; }
+    if (!rb_valid(b)) return 0;
+    memcpy(g_bind, b, 16); g_bind_on = 1; return 1;
+}
+int prompts_control_type(void) { return g_ctrl_type; }
 static uint32_t g_pad;
 static int row_of(const char *key) { for (int i = 0; i < NROW; i++) if (!strcmp(k_rows[i].key, key)) return i; return -1; }
 uint32_t nnhid_menu_pad(void) { return g_pad; }
@@ -130,6 +139,32 @@ int main(int argc, char **argv) {
     panel(dir, "pcmenu_3840x2160", 3840, 2160);
     g_sel = vsr; g_ver++;
     panel(dir, "pcmenu_1920x1080", 1920, 1080);
+    /* Controls subpage: open, cycle Preset, capture a button via pad with swap-on-conflict, return to page 0 */
+    {
+        int ctr = row_of("controls"), pr = row_of("bind_preset"), dr = row_of("bind_dodge"), jr = row_of("bind_jump");
+        assert(ctr >= 0 && pr >= 0 && dr >= 0 && jr >= 0);
+        assert(activate(ctr, 1) == 1 && g_page == 1 && g_sel == pr);
+        assert(!g_bind_on && !strcmp(val_name(pr), "Game (Type B)"));
+        /* Preset: Game -> Type A -> Type C */
+        change(pr, 1, 0); assert(g_bind_on && g_cur[pr] == 1 && g_cur[dr] == RB_ZR);
+        change(pr, 1, 0); change(pr, 1, 0); assert(g_cur[pr] == 3 && g_cur[dr] == RB_R);
+        /* Reset to Type A, then arm capture on Dodge and press B on the pad -> swaps Dodge(ZR) <-> Jump(B) */
+        set_value(pr, 1); assert(g_cur[dr] == RB_ZR && g_cur[jr] == RB_B);
+        AcquireSRWLockExclusive(&g_lock);
+        g_sel = dr; activate(dr, 1); g_ver++;
+        ReleaseSRWLockExclusive(&g_lock);
+        assert(g_cap == dr);
+        g_pad = 0; Sleep(40);                              /* arm (all buttons released) */
+        g_pad = 1u << RB_B; Sleep(60);                     /* press B */
+        g_pad = 0;
+        assert(g_cap == -1 && g_cur[dr] == RB_B && g_cur[jr] == RB_ZR && g_cur[pr] == -1 && !strcmp(val_name(pr), "Custom"));
+        assert(g_bind_on && g_bind[RB_ZR] == RB_B && g_bind[RB_B] == RB_ZR);
+        g_sel = dr; g_ver++;
+        panel(dir, "pcmenu_controls_1280x720", 1280, 720);
+        /* Reset Preset back to Game's setting and return to page 0 */
+        set_value(pr, 0); assert(!g_bind_on && g_cur[pr] == 0);
+        page_go(0, 1); assert(g_page == 0 && g_sel == ctr);
+    }
     /* closing: every player reads an idle pad until that player has let go (player 2 = a keyboard holding Esc = Plus) */
     InterlockedExchange(&g_open, 0); Sleep(200);           /* the menu's thread ends: what it does at a close */
     assert(g_release == 0xff && !g_guest_frozen && (g_work & 4) && !row_restart(rs));

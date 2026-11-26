@@ -27,10 +27,14 @@
 #include <string.h>
 #ifndef PROMPTS_NO_WIN
 #include <windows.h>
+extern __declspec(dllimport) volatile uint8_t game_rebind[16];
+extern __declspec(dllimport) volatile int game_rebind_on;
+extern __declspec(dllimport) volatile int game_control_type;
 #endif
 #include "prompts.h"
 #include "prompt_art.h"
 #include "nnpad.h"
+#include "rebind.h"
 #include "tex_decode.h"
 #include "tex_pack.h"
 
@@ -834,6 +838,24 @@ void prompts_menu_swap_tick(void) {
                want ? "on (B confirm, A back)" : "off (A confirm, B back)",
                *confirm_bits, *cancel_bits);
     }
+    /* Sync gameplay controller rebinding state into game.dll / game.so (disabled on keyboard). */
+    {
+        unsigned char r[16];
+        int on = nnpad_bind_live() && current_family() != 4 && nnpad_bind_get(r) && rb_valid(r);
+        if (on) {
+            for (int i = 0; i < 16; i++) game_rebind[i] = r[i];
+        }
+        game_rebind_on = on;
+    }
+#endif
+}
+
+int prompts_control_type(void) {
+#ifndef PROMPTS_NO_WIN
+    int t = game_control_type;
+    return t >= 0 && t < 4 ? t : 0;
+#else
+    return 0;
 #endif
 }
 

@@ -16,8 +16,12 @@ int prompts_identify(int nvn_format, int w, int h, int levels, int layers, size_
 /* Patches level 0 tightly-packed texels (RGBA8 or BC3 blocks) in-place for the current prompt family / bindings. */
 void prompts_patch(int atlas_id, uint8_t *linear, int w, int h, int nvn_format);
 
-/* Keeps the game's in-game menu confirm/cancel masks and menu button-guide icons in sync with swap_confirm.
+/* Keeps the game's in-game menu confirm/cancel masks and menu button-guide icons in sync with swap_confirm,
+ * and pushes live gameplay controller rebinding state into the game library.
  * Called from player 1's pad poll (nnhid.c) after device-use tracking updates. */
 void prompts_menu_swap_tick(void);
+
+/* Returns the save's built-in Control Type (0=Type A .. 3=Type D) reported by the game library. */
+int prompts_control_type(void);
 
 #endif
