@@ -14,6 +14,7 @@
 #include <windows.h>
 #include <SDL3/SDL.h>
 #include "nnpad.h"
+#include "rebind.h"
 
 #define MAXDEV 16
 #define MAXCFG 64
@@ -39,6 +40,7 @@ typedef struct {
     float mouse_sens;                   /* [Recomps#1] [keyboard] mouse_sensitivity (default 1.0) */
     int prompts;                        /* [Recomps#1] [general] button_prompts: 0 auto, 1 switch, 2 playstation, 3 xbox */
     int menu_swap;                      /* [moonriver] [general] swap_confirm */
+    unsigned char bind[16]; int bind_on;/* [moonriver] [general] bind_controls (r[logical] = physical Pro button) */
     int input;                          /* [Recomps#1] [general] input: 0 both, 1 keyboard (pads unused), 2 controller (keyboard and mouse unused) */
 } Cfg;
 typedef struct {
@@ -167,6 +169,10 @@ static const char *const g_default_ini =
 "; Menus confirm with B and go back with A, and their button prompts show it: on / off. Gameplay keeps its buttons, and the\r\n"
 ";   keyboard its keys. Which button is B depends on layout above: with positional, the bottom one (A on an Xbox pad).\r\n"
 "swap_confirm = off\r\n"
+"; Gameplay button rebinding (controllers only; menus keep their buttons and keyboard keys stay in [keyboard] below).\r\n"
+";   game = use the game's own Control Type (A-D). Or 16 Pro button names in Type A order (A B X Y STICK_L STICK_R L R ZL ZR PLUS MINUS LEFT UP RIGHT DOWN),\r\n"
+";   e.g. edited from PC Settings (F1 / Start+Select) -> Controls.\r\n"
+"bind_controls = game\r\n"
 "; Which input the game takes: both (pads and the keyboard + mouse, merged), keyboard (pads are ignored), controller (the\r\n"
 ";   keyboard and mouse are ignored). The keyboard part takes effect when the game starts, the pads part at once.\r\n"
 "input = both\r\n"
@@ -282,6 +288,27 @@ static int parse_vk(const char *t) {           /* [Recomps#1] one key, or two se
     return parse_vk1(b) | parse_vk1(c + 1) << 8;
 }
 static int parse_bool(const char *v) { return !(_stricmp(v, "off") && _stricmp(v, "0") && _stricmp(v, "no") && _stricmp(v, "false")) ? 0 : 1; }
+static int parse_bind(const char *val, unsigned char out[16]) {
+    if (!_stricmp(val, "game") || !_stricmp(val, "off") || !_stricmp(val, "default")) return 0;
+    unsigned char tmp[16];
+    int n = 0;
+    for (const char *p = val; *p && n < 16; ) {
+        while (*p == ' ' || *p == '\t' || *p == ',') p++;
+        if (!*p) break;
+        char tok[24]; int k = 0;
+        while (*p && *p != ',' && *p != ' ' && *p != '\t' && k < (int)sizeof tok - 1) tok[k++] = *p++;
+        tok[k] = 0;
+        int idx = -1;
+        for (int b = 0; b < 16; b++) if (!_stricmp(tok, g_pro[b])) { idx = b; break; }
+        if (idx < 0 && !_stricmp(tok, "L3")) idx = RB_STICK_L;
+        if (idx < 0 && !_stricmp(tok, "R3")) idx = RB_STICK_R;
+        if (idx < 0) return 0;
+        tmp[n++] = (unsigned char)idx;
+    }
+    if (n != 16 || !rb_valid(tmp)) return 0;
+    memcpy(out, tmp, 16);
+    return 1;
+}
 
 static DevCfg *cfg_find(Cfg *c, const char *guid, int create) {
     for (int i = 0; i < c->ndev; i++) if (!_stricmp(c->dev[i].guid, guid)) return &c->dev[i];
@@ -345,6 +372,7 @@ static void cfg_parse(Cfg *c, char *text) {
         else if (sect == 1 && !_stricmp(key, "button_prompts"))                                /* [Recomps#1] */
             c->prompts = prompts_value(val);
         else if (sect == 1 && !_stricmp(key, "swap_confirm")) c->menu_swap = !_stricmp(val, "on");
+        else if (sect == 1 && !_stricmp(key, "bind_controls")) c->bind_on = parse_bind(val, c->bind);
         else if (sect == 1 && !_stricmp(key, "ignore")) { if (c->nignore < 16) snprintf(c->ignore[c->nignore++], sizeof c->ignore[0], "%s", val); }
         else if (sect == 1) cfg_set(c, &c->def, 0, key, val);
         else if (sect == 4 && cur) cfg_set(c, cur, 1, key, val);
@@ -828,6 +856,36 @@ void nnpad_prompts_used(int keyboard) { g_prompts_kb = keyboard; }
 /* swap_confirm in force: only for a pad, or Enter would go back and the keyboard's prompts (its keys, on the A and B pictures) would lie */
 int nnpad_menu_swapped(void) {
     lock(); if (!g_cfg.path[0]) cfg_load(1); int on = g_cfg.menu_swap; unlock();
+    return on && nnpad_button_prompts() != 4;
+}
+/* [moonriver] gameplay button rebinding (controllers.ini [general] bind_controls): persisted live, pad-only */
+int nnpad_bind_get(unsigned char *out) {
+    lock(); if (!g_cfg.path[0]) cfg_load(1);
+    int on = g_cfg.bind_on;
+    if (on && out) memcpy(out, g_cfg.bind, 16);
+    unlock();
+    return on;
+}
+int nnpad_bind_set(const unsigned char *b) {
+    if (b && !rb_valid(b)) return 0;
+    char val[160];
+    if (!b) snprintf(val, sizeof val, "game");
+    else {
+        int pos = 0;
+        for (int i = 0; i < 16; i++)
+            pos += snprintf(val + pos, sizeof val - (size_t)pos, "%s%s", i ? ", " : "", g_pro[b[i]]);
+    }
+    lock();
+    int ok = cfg_key_set("bind_controls", val);
+    if (ok) {
+        if (b) { memcpy(g_cfg.bind, b, 16); g_cfg.bind_on = 1; }
+        else g_cfg.bind_on = 0;
+    }
+    unlock();
+    return ok;
+}
+int nnpad_bind_live(void) {
+    lock(); if (!g_cfg.path[0]) cfg_load(1); int on = g_cfg.bind_on; unlock();
     return on && nnpad_button_prompts() != 4;
 }
 int nnpad_button_prompts(void) {
@@ -1330,6 +1388,13 @@ int nnpad_selftest(const NnHidHooks *h) {
         int ok = !strcmp(nnpad_menu_swap_setting(), "on") && nnpad_menu_swap_set("off") && !strcmp(nnpad_menu_swap_setting(), "off");
         { size_t n = 0; char *t = read_file(g_cfg.path, &n); ok = ok && t && strstr(t, "swap_confirm = off\r\n[keyboard]") && strstr(t, "deadzone = 0.10\r\n"); free(t); }
         check(ok, "swap_confirm read from the ini; set keeps the file's other lines");
+        {
+            unsigned char b[16], got[16];
+            rb_preset(0, b); rb_swap(b, RB_ZR, RB_B);
+            int bok = !nnpad_bind_get(got) && nnpad_bind_set(b) && nnpad_bind_get(got) && !memcmp(b, got, 16);
+            bok = bok && nnpad_bind_set(NULL) && !nnpad_bind_get(got);
+            check(bok, "bind_controls saved to controllers.ini and reset back to game");
+        }
         SDL_SetJoystickVirtualAxis(js[0], SDL_GAMEPAD_AXIS_LEFTY, 0);
         h->vibrate(0, 1.0f, 1.0f);
         check(g_vj[0].lo == 0 && g_vj[0].hi == 0, "rumble = off for this device: nothing reaches the pad");

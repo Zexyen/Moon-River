@@ -33,6 +33,7 @@
 #include <stdint.h>
 #include <time.h>
 #include "gfx_options.h"
+#include "rebind.h"
 #define STBTT_STATIC
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "third_party/stb_truetype.h"
@@ -68,45 +69,72 @@ const char *nnpad_layout_setting(void);
 int nnpad_layout_set(const char *val);
 int nnpad_button_prompts(void);
 int nnpad_prompts_by_letter(void);
+int nnpad_bind_get(unsigned char *out);
+int nnpad_bind_set(const unsigned char *b);
+int prompts_control_type(void);
 
-/* A_PROMPTS, A_MENU_SWAP, A_LAYOUT: keys of controllers.ini. A_QUIT: ends the game */
-enum { A_LIVE, A_VSYNC, A_WINDOW, A_SIZE, A_SCALE, A_RESTART, A_PROMPTS, A_MENU_SWAP, A_LAYOUT, A_QUIT };
+/* A_PROMPTS, A_MENU_SWAP, A_LAYOUT: keys of controllers.ini. A_PAGE: opens Controls page.
+ * A_QUIT: ends the game. A_PRESET / A_BIND: page 1 (Controls) rows. */
+enum { A_LIVE, A_VSYNC, A_WINDOW, A_SIZE, A_SCALE, A_RESTART, A_PROMPTS, A_MENU_SWAP, A_LAYOUT, A_PAGE, A_QUIT, A_PRESET, A_BIND };
 #define ROW_VALUES 12
 typedef struct {
     const char *key, *label, *help, *env, *dflt;           /* dflt: the reader's value when the key is not in the file */
     int apply, optional;
     const char *val[ROW_VALUES], *name[ROW_VALUES];
+    int slot;                                              /* A_BIND: Type A logical Pro button index 0..15 */
 } Row;
+#define BIND(key, label, slot) {key, label, "Press A / Enter, then press the controller button to assign (swaps if already used). Left / right also cycles buttons.", NULL, NULL, A_BIND, 0, {0}, {0}, slot}
 static const Row k_rows[] = {
     {"window", "Display mode", "Windowed: a window of the size below. Borderless and fullscreen cover the monitor the window is on.", NULL, "windowed", A_WINDOW, 0,
-     {"windowed", "borderless", "fullscreen"}, {"Windowed", "Borderless", "Fullscreen"}},
+     {"windowed", "borderless", "fullscreen"}, {"Windowed", "Borderless", "Fullscreen"}, 0},
     {"size", "Window size", "The window's size in windowed mode. The game is drawn at the internal resolution and shown at this size.", "MR_WINDOW", NULL, A_SIZE, 0,
-     {"1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160"}, {"1280 \xC3\x97 720", "1600 \xC3\x97 900", "1920 \xC3\x97 1080", "2560 \xC3\x97 1440", "3840 \xC3\x97 2160"}},
+     {"1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160"}, {"1280 \xC3\x97 720", "1600 \xC3\x97 900", "1920 \xC3\x97 1080", "2560 \xC3\x97 1440", "3840 \xC3\x97 2160"}, 0},
     {"frame_rate", "Frame rate", "60: as on the console. Above 60 (experimental): real-time clock, smart timers and smoothings. Applies at the next start.", "RECOMPS_UNCAP", "60", A_RESTART, 0,
-     {"60", "90", "120"}, {"60 fps", "90 fps", "120 fps"}},
+     {"60", "90", "120"}, {"60 fps", "90 fps", "120 fps"}, 0},
     {"vsync", "Vertical sync", "Auto: locked to a 60 / 120 / 240 Hz display, else the program's own clock. Off: no waiting, tearing allowed. On: the swapchain's FIFO.", "MR_VK_PRESENT", "auto", A_VSYNC, 0,
-     {"auto", "display", "clock", "off", "on", "mailbox"}, {"Auto", "Display", "Clock", "Off", "On", "Mailbox"}},
+     {"auto", "display", "clock", "off", "on", "mailbox"}, {"Auto", "Display", "Clock", "Off", "On", "Mailbox"}, 0},
     {"resolution_scale", "Internal resolution", "The size the game renders at (720p is the console's docked size). Applies when this panel closes.", "MR_VK_SCALE", "1.0", A_SCALE, 0,
      {"0.5", "0.75", "1.0", "1.25", "1.5", "2.0", "2.5", "3.0"},
-     {"360p", "540p", "720p", "900p", "1080p", "1440p", "1800p", "4K"}},
+     {"360p", "540p", "720p", "900p", "1080p", "1440p", "1800p", "4K"}, 0},
     {"hdr", "HDR", "Auto: HDR output while the desktop's HDR is on for this monitor. The scene's lights go above white, up to HDR peak; menus and the HUD stay at white.", NULL, "auto", A_LIVE, 0,
-     {"auto", "off", "on"}, {"Auto", "Off", "On"}},
+     {"auto", "off", "on"}, {"Auto", "Off", "On"}, 0},
     {"hdr_paper_white", "HDR white", "How bright the game's white is with HDR on. Auto: the desktop's brightness of SDR programs.", NULL, "auto", A_LIVE, 0,
-     {"auto", "100", "150", "200", "250", "300", "400"}, {"Auto", "100 nits", "150 nits", "200 nits", "250 nits", "300 nits", "400 nits"}},
+     {"auto", "100", "150", "200", "250", "300", "400"}, {"Auto", "100 nits", "150 nits", "200 nits", "250 nits", "300 nits", "400 nits"}, 0},
     {"hdr_peak", "HDR peak", "How bright the scene's brightest parts get with HDR on: your monitor's peak brightness. Auto: what the desktop says (Linux), 1000 on Windows.", NULL, "auto", A_LIVE, 0,
-     {"auto", "400", "600", "800", "1000", "1500", "2000", "4000"}, {"Auto", "400 nits", "600 nits", "800 nits", "1000 nits", "1500 nits", "2000 nits", "4000 nits"}},
+     {"auto", "400", "600", "800", "1000", "1500", "2000", "4000"}, {"Auto", "400 nits", "600 nits", "800 nits", "1000 nits", "1500 nits", "2000 nits", "4000 nits"}, 0},
     {"aspect", "Picture fit", "Keep shape: 16:9 with bars. Stretch: fills window. Wide: native 21:9 / 32:9 ultrawide (applies at next start).", NULL, "keep", A_LIVE, 0,
-     {"keep", "stretch", "wide"}, {"Keep shape", "Stretch", "Wide"}},
+     {"keep", "stretch", "wide"}, {"Keep shape", "Stretch", "Wide"}, 0},
     {"hud_area", "HUD area", "Ultrawide only. Centered (16:9): keeps HUD in the middle 16:9 area. Full screen: moves corner HUD elements to the ultrawide edges.", NULL, "screen", A_LIVE, 0,
-     {"16:9", "screen"}, {"Centered (16:9)", "Full screen"}},
+     {"16:9", "screen"}, {"Centered (16:9)", "Full screen"}, 0},
     {"button_prompts", "Button prompts", "Which buttons the game shows. Auto follows what you use, pad, keyboard or mouse. The others always show that set.", NULL, "auto", A_PROMPTS, 0,
-     {"auto", "playstation", "xbox", "switch", "keyboard"}, {"Auto", "PlayStation", "Xbox", "Switch", "Keyboard"}},
+     {"auto", "playstation", "xbox", "switch", "keyboard"}, {"Auto", "PlayStation", "Xbox", "Switch", "Keyboard"}, 0},
     {"swap_confirm", "Swap Confirm", "Menus confirm with B and go back with A, and show it. Gameplay and the keyboard stay the same. This panel follows when it next opens.", NULL, "off", A_MENU_SWAP, 0,
-     {"off", "on"}, {"Off", "On"}},
+     {"off", "on"}, {"Off", "On"}, 0},
     {"layout", "Face buttons", "Position: the right button acts as A, as on a Switch. Printed letter: the button marked A, Cross as A on PlayStation pads. Prompts follow.", NULL, "auto", A_LAYOUT, 0,
-     {"auto", "positional", "labels"}, {"Auto", "Position", "Printed letter"}},
+     {"auto", "positional", "labels"}, {"Auto", "Position", "Printed letter"}, 0},
+    {"controls", "Controls", "Rebind every button of gameplay for controllers. Menus keep their own buttons, and the game's prompts follow yours.", NULL, "open", A_PAGE, 0,
+     {"open"}, {"Open"}, 0},
     {"quit", "Quit to desktop", "Ends the game, as closing its window does. Progress since the last save is lost. Press again to confirm.", NULL, "quit", A_QUIT, 0,
-     {"quit"}, {"Quit"}},
+     {"quit"}, {"Quit"}, 0},
+    /* ---- Page 1: Controls ---- */
+    {"bind_preset", "Preset", "Bayonetta 2's four built-in control types as a starting point. Game's setting uses the save's own Control Type (A-D).", NULL, "game", A_PRESET, 0,
+     {"game", "a", "b", "c", "d"}, {"Game's setting", "Type A", "Type B", "Type C", "Type D"}, 0},
+    BIND("bind_punch",  "Punch",            RB_X),
+    BIND("bind_kick",   "Kick",             RB_A),
+    BIND("bind_jump",   "Jump",             RB_B),
+    BIND("bind_shoot",  "Shoot",            RB_Y),
+    BIND("bind_dodge",  "Dodge",            RB_ZR),
+    BIND("bind_lock",   "Lock-On",          RB_R),
+    BIND("bind_weapon", "Weapon Set",       RB_ZL),
+    BIND("bind_climax", "Umbran Climax",    RB_L),
+    BIND("bind_cam",    "Reset Camera",     RB_STICK_R),
+    BIND("bind_l3",     "Left Stick Press", RB_STICK_L),
+    BIND("bind_dleft",  "Item (Left)",      RB_LEFT),
+    BIND("bind_dup",    "Item (Up)",        RB_UP),
+    BIND("bind_dright", "Item (Right)",     RB_RIGHT),
+    BIND("bind_ddown",  "Item (Down)",      RB_DOWN),
+    BIND("bind_sub",    "Subscreen",        RB_MINUS),
+    BIND("bind_pause",  "Pause",            RB_PLUS),
 };
 #define NROW ((int)(sizeof k_rows / sizeof k_rows[0]))
 
@@ -122,12 +150,16 @@ static unsigned g_ver;
 static int g_env_cut, g_env_set[NROW];
 static int g_swap, g_quit_ask;                                         /* swap_confirm as this opening of the panel began; Quit confirm */
 static int g_fam, g_letter;                                /* the button names of the hints */
+static int g_page, g_cap = -1, g_cap_armed;                /* 1 = Controls page; g_cap = row waiting for a pad button */
+static ULONGLONG g_cap_t;
+static uint8_t g_b[16], g_b_start[16];                     /* Controls layout shown & snapshot when opened */
+static int g_b_on, g_b_start_on;
 /* the environment as the program started (gfx_options sets MR_CUTSCENE_FPS itself, later) */
 __attribute__((constructor)) static void pcmenu_env(void) {
     for (int i = 0; i < NROW; i++) g_env_set[i] = k_rows[i].env && getenv(k_rows[i].env) != NULL;
 }
-static int row_on(int i) { return g_shown[i] && (strncmp(k_rows[i].key, "hdr_", 4) || nvn_vk_hdr_on()); }      /* HDR's two brightness rows: while the picture goes out as HDR */
-static int row_count(int i) { int n = 0; while (n < ROW_VALUES && k_rows[i].val[n]) n++; return n; }
+static int row_on(int i) { return g_shown[i] && g_page == (k_rows[i].apply >= A_PRESET) && (strncmp(k_rows[i].key, "hdr_", 4) || nvn_vk_hdr_on()); }      /* HDR's two brightness rows: while the picture goes out as HDR */
+static int row_count(int i) { if (k_rows[i].apply == A_BIND) return 16; int n = 0; while (n < ROW_VALUES && k_rows[i].val[n]) n++; return n; }
 static int find_val(int i, const char *v) {
     for (int k = 0; k < row_count(i); k++) {
         if (!_stricmp(k_rows[i].val[k], v)) return k;
@@ -136,8 +168,40 @@ static int find_val(int i, const char *v) {
     }
     return -1;
 }
-static void page_go(void) {                                /* the first row shown */
+static void binds_sync(void) {
+    for (int i = 0; i < NROW; i++) {
+        if (k_rows[i].apply == A_BIND) {
+            g_cur[i] = g_b[k_rows[i].slot];
+            g_start[i] = g_b_start[k_rows[i].slot];
+        } else if (k_rows[i].apply == A_PRESET) {
+            if (!g_b_on) g_cur[i] = 0;
+            else {
+                int p = rb_which_preset(g_b);
+                g_cur[i] = p >= 0 ? p + 1 : -1;
+                if (g_cur[i] < 0) snprintf(g_raw[i], sizeof g_raw[i], "Custom");
+            }
+            if (!g_b_start_on) g_start[i] = 0;
+            else {
+                int p = rb_which_preset(g_b_start);
+                g_start[i] = p >= 0 ? p + 1 : -1;
+            }
+        }
+    }
+}
+static void binds_load(void) {
+    g_b_on = nnpad_bind_get(g_b) && rb_valid(g_b);
+    if (!g_b_on) rb_preset(prompts_control_type(), g_b);
+    memcpy(g_b_start, g_b, 16);
+    g_b_start_on = g_b_on;
+    binds_sync();
+}
+static void page_go(int page, int focus_controls) {
+    g_page = page;
+    g_cap = -1;
     g_quit_ask = 0;
+    if (page == 0 && focus_controls) {
+        for (int i = 0; i < NROW; i++) if (k_rows[i].apply == A_PAGE && row_on(i)) { g_sel = i; return; }
+    }
     g_sel = 0;
     while (g_sel < NROW - 1 && !row_on(g_sel)) g_sel++;
 }
@@ -146,20 +210,22 @@ static void menu_init(void) {                              /* the first opening:
     char v[64];
     for (int i = 0; i < NROW; i++) {
         const Row *r = &k_rows[i];
-        int have = r->apply == A_SIZE || r->apply == A_PROMPTS || r->apply == A_MENU_SWAP || r->apply == A_LAYOUT || r->apply == A_QUIT || gfx_ini_get(r->key, v, sizeof v);
+        if (r->apply == A_BIND) { g_shown[i] = 1; g_lock_why[i] = 0; continue; }
+        int have = r->apply == A_SIZE || r->apply == A_PROMPTS || r->apply == A_MENU_SWAP || r->apply == A_LAYOUT || r->apply == A_PAGE || r->apply == A_QUIT || r->apply == A_PRESET || gfx_ini_get(r->key, v, sizeof v);
         if (r->apply == A_WINDOW) { static const char *const w[3] = {"windowed", "borderless", "fullscreen"}; snprintf(v, sizeof v, "%s", w[o->window_mode]); have = 1; }      /* [moonriver] what runs: Big Picture's borderless included (gfx_options.c) */
         else if (r->apply == A_SIZE) snprintf(v, sizeof v, "%dx%d", o->width, o->height);      /* MR_WINDOW included */
         else if (r->apply == A_PROMPTS) snprintf(v, sizeof v, "%s", nnpad_prompts_setting());
         else if (r->apply == A_MENU_SWAP) snprintf(v, sizeof v, "%s", nnpad_menu_swap_setting());
         else if (r->apply == A_LAYOUT) snprintf(v, sizeof v, "%s", nnpad_layout_setting());
-        else if (r->apply == A_QUIT) snprintf(v, sizeof v, "quit");
+        else if (r->apply == A_PAGE || r->apply == A_QUIT || r->apply == A_PRESET) snprintf(v, sizeof v, "%s", r->dflt);
         else if (!have) snprintf(v, sizeof v, "%s", r->dflt);
         g_shown[i] = !r->optional || have;
         if ((g_cur[i] = find_val(i, v)) < 0) snprintf(g_raw[i], sizeof g_raw[i], "%s", v);
         g_start[i] = g_cur[i];
         g_lock_why[i] = g_env_set[i] ? 1 : o->profile == 1 && (!strcmp(r->key, "vsync") || !strcmp(r->key, "resolution_scale")) ? 2 : 0;
     }
-    if (!g_shown[g_sel]) g_sel = 0;
+    binds_load();
+    if (!row_on(g_sel)) page_go(0, 0);
     g_inited = 1;
 }
 
@@ -750,10 +816,19 @@ static const char *pad_name(int b) {
     return sw[b];
 }
 static const char *val_name(int i) {
+    if (i == g_cap) return "Press a button\xE2\x80\xA6";
+    if (k_rows[i].apply == A_BIND) return pad_name(g_cur[i] >= 0 && g_cur[i] < 16 ? g_cur[i] : 0);
+    if (k_rows[i].apply == A_PRESET && g_cur[i] == 0) {
+        static const char *const gn[4] = {"Game (Type A)", "Game (Type B)", "Game (Type C)", "Game (Type D)"};
+        int ct = prompts_control_type();
+        return gn[ct >= 0 && ct < 4 ? ct : 0];
+    }
+    if (k_rows[i].apply == A_PAGE) return g_b_on ? "Custom  \xE2\x80\xBA" : "Open  \xE2\x80\xBA";
     if (k_rows[i].apply == A_QUIT && g_quit_ask) return "Press again to quit";
     return g_cur[i] >= 0 ? k_rows[i].name[g_cur[i]] : g_raw[i];
 }
 static int row_restart(int i) {
+    if (k_rows[i].apply == A_PAGE || k_rows[i].apply == A_QUIT || k_rows[i].apply == A_PRESET || k_rows[i].apply == A_BIND) return 0;
     if (g_cur[i] == g_start[i]) return 0;
     if (!strcmp(k_rows[i].key, "aspect")) return (g_cur[i] >= 0 && !strcmp(k_rows[i].val[g_cur[i]], "wide")) || (g_start[i] >= 0 && !strcmp(k_rows[i].val[g_start[i]], "wide"));
     return k_rows[i].apply == A_RESTART || (k_rows[i].apply == A_SCALE && g_open) || ((k_rows[i].apply == A_WINDOW || k_rows[i].apply == A_SIZE) && g_nowin);
@@ -934,26 +1009,30 @@ static void draw_panel_words(int W, int H, float s) {
     for (int i = 0; i < NROW; i++) nshow += row_on(i);
     float pad = 42 * s, cx0 = edge + pad, cx1 = W - pad, cw = cx1 - cx0;
 
-    /* ---- Header breadcrumb (Moon River icon + Moon River — PC Settings) ---- */
-    float hy = 28 * s, ic = 30 * s, cpx = 21 * s;
+    /* ---- Header breadcrumb (Moon River — PC Settings, or PC Settings — Controls) ---- */
+    float hy = g_page ? 20 * s : 28 * s, ic = (g_page ? 26 : 30) * s, cpx = (g_page ? 19 : 21) * s;
     int cbase = (int)(hy + ic * 0.5f + cpx * 0.34f);
     art32_blit(&g_icon, cx0, hy, ic, ic, 1.0f, 0, edge, 1);
-    float hx = text(&g_f_head, cx0 + ic + 10 * s, cbase, "Moon River", cpx, C_CRUMB, 0.4f * s) + 14 * s;
+    float hx = text(&g_f_head, cx0 + ic + 10 * s, cbase, g_page ? "PC Settings" : "Moon River", cpx, C_CRUMB, 0.4f * s) + 14 * s;
     rect((int)hx, (int)(hy + ic * 0.5f), (int)(22 * s), (int)(1.2f * s + 0.5f) ? (int)(1.2f * s + 0.5f) : 1, C_CYAN_MID, 0.9f);
     hx += 22 * s + 14 * s;
-    text_glow(&g_f_head, hx, cbase, "PC Settings", cpx, C_ICE, C_CYAN, 4.5f * s, 0.55f, 0.4f * s);
-    text(&g_f_ui, cx0 + 2 * s, (int)(hy + ic + 22 * s), "The game waits while this is open.", 14.5f * s, C_MUTE, 0.3f * s);
+    text_glow(&g_f_head, hx, cbase, g_page ? "Controls" : "PC Settings", cpx, C_ICE, C_CYAN, 4.5f * s, 0.55f, 0.4f * s);
+    const char *sub = !g_page ? "The game waits while this is open."
+                    : g_fam == 4 ? "Controller layout (keyboard keys are in [keyboard] of controllers.ini)."
+                                 : "Gameplay buttons for controllers. Menus keep their own.";
+    text(&g_f_ui, cx0 + 2 * s, (int)(hy + ic + (g_page ? 17 : 22) * s), sub, (g_page ? 13.5f : 14.5f) * s, C_MUTE, 0.3f * s);
 
     /* ---- Settings rows (aligned vertical Moon River list, matching launcher .rows / .rw) ---- */
     float band_y = H - 116 * s, foot_y = H - 58 * s;
-    float top = 96 * s;
-    float avail = (band_y - 34 * s) - top;
+    float top = g_page ? 76 * s : 96 * s;
+    float avail = (band_y - (g_page ? 22 : 34) * s) - top;
     float rowh = nshow > 0 ? avail / nshow : 44 * s;
-    if (rowh > 44 * s) rowh = 44 * s;
-    if (rowh < 28 * s) rowh = 28 * s;
-    float rpx = rowh * 0.48f, vpx = rowh * 0.41f;
-    if (rpx > 21 * s) rpx = 21 * s;
-    if (vpx > 17.5f * s) vpx = 17.5f * s;
+    float maxh = g_page ? 34 * s : 44 * s, minh = g_page ? 24 * s : 28 * s;
+    if (rowh > maxh) rowh = maxh;
+    if (rowh < minh) rowh = minh;
+    float rpx = rowh * (g_page ? 0.55f : 0.48f), vpx = rowh * (g_page ? 0.48f : 0.41f);
+    if (rpx > (g_page ? 18.0f : 21.0f) * s) rpx = (g_page ? 18.0f : 21.0f) * s;
+    if (vpx > (g_page ? 15.5f : 17.5f) * s) vpx = (g_page ? 15.5f : 17.5f) * s;
     /* Top border hairline of the rows list (launcher .rows border-top: #6fe6ff38) */
     rect((int)cx0, (int)top, (int)cw, 1, C_CYAN, 0.24f);
     g_row_h = (int)rowh;
@@ -963,15 +1042,17 @@ static void draw_panel_words(int W, int H, float s) {
         if (!row_on(i)) continue;
         g_row_y[i] = y;
         g_row_x0[i] = (int)cx0; g_row_x1[i] = (int)cx1;
-        float vx1 = cx1 - 12 * s, vx0 = vx1 - 224 * s;
-        g_val_x0[i] = (int)(k_rows[i].apply == A_QUIT ? cx0 : vx0);
+        float vx1 = cx1 - 12 * s, vx0 = vx1 - (g_page ? 248 : 224) * s;
+        int is_pill = k_rows[i].apply == A_QUIT || k_rows[i].apply == A_PAGE;
+        g_val_x0[i] = (int)(is_pill ? cx0 : vx0);
         g_val_x1[i] = (int)vx1;
-        int sel = i == g_sel, base = y + (int)(rowh * 0.65f);
+        int sel = i == g_sel, base = y + (int)(rowh * 0.67f);
         int is_quit_ask = k_rows[i].apply == A_QUIT && g_quit_ask;
-        int changed = g_cur[i] != g_start[i] && k_rows[i].apply != A_QUIT;
+        int is_cap = i == g_cap;
+        int changed = !is_pill && (g_cur[i] != g_start[i] || (k_rows[i].apply == A_PRESET && g_b_on != g_b_start_on));
         if (sel) {
-            /* Cyan wash gradient across the selected row (launcher .rw:focus) */
-            Rgb accent = is_quit_ask ? C_ERR_DOT : C_CYAN;
+            /* Cyan wash gradient across the selected row (gold while waiting for a button press) */
+            Rgb accent = is_quit_ask ? C_ERR_DOT : is_cap ? C_GOLD : C_CYAN;
             hgrad_a((int)cx0, y, (int)cw, (int)rowh, accent, accent, 0.16f, 0.02f);
             /* Soft rightward bloom from the left accent bar */
             int bl = (int)(12 * s);
@@ -987,14 +1068,14 @@ static void draw_panel_words(int W, int H, float s) {
         }
         /* Row label in Marcellus (white with cyan glow when selected) */
         Rgb tc = g_lock_why[i] ? C_DIM : is_quit_ask ? C_ERR : sel ? C_WHITE : C_INK;
-        if (sel && !g_lock_why[i]) text_glow(&g_f_head, cx0 + 16 * s, base, k_rows[i].label, rpx, tc, is_quit_ask ? C_ERR_DOT : C_CYAN, 4.0f * s, 0.50f, 0.3f * s);
+        if (sel && !g_lock_why[i]) text_glow(&g_f_head, cx0 + 16 * s, base, k_rows[i].label, rpx, tc, is_quit_ask ? C_ERR_DOT : is_cap ? C_GOLD : C_CYAN, 4.0f * s, 0.50f, 0.3f * s);
         else text(&g_f_head, cx0 + 16 * s, base, k_rows[i].label, rpx, tc, 0.3f * s);
         /* Value text & chevrons */
         const char *v = val_name(i);
         float vw = text_w(&g_f_uib, v, vpx, 0);
-        Rgb vc = g_lock_why[i] ? C_DIM : is_quit_ask ? C_ERR : changed ? C_GOLD : sel ? C_WHITE : C_ICE;
-        if (k_rows[i].apply == A_QUIT) {
-            /* Action row: right-aligned subtle pill look without < > chevrons */
+        Rgb vc = g_lock_why[i] ? C_DIM : is_quit_ask ? C_ERR : is_cap ? C_GOLD : changed ? C_GOLD : (k_rows[i].apply == A_PAGE && g_b_on) ? C_GOLD : sel ? C_WHITE : C_ICE;
+        if (is_pill) {
+            /* Action / Subpage row: right-aligned subtle pill look without < > chevrons */
             float bx = vx1 - vw - 22 * s, bw = vw + 22 * s, bh = rowh * 0.64f, by = y + (rowh - bh) * 0.5f;
             Rgb bc = is_quit_ask ? C_ERR_DOT : sel ? C_CYAN : C_CYAN_MID;
             rect((int)bx, (int)by, (int)bw, (int)bh, is_quit_ask ? C_ERR_DOT : C_SKY2, sel ? 0.32f : 0.20f);
@@ -1005,7 +1086,7 @@ static void draw_panel_words(int W, int H, float s) {
             text(&g_f_uib, bx + (bw - vw) * 0.5f, base - (int)(rowh * 0.02f), v, vpx, vc, 0);
         } else {
             text(&g_f_uib, (vx0 + vx1) * 0.5f - vw * 0.5f, base, v, vpx, vc, 0);
-            if (!g_lock_why[i]) {
+            if (!g_lock_why[i] && !is_cap) {
                 float cva = sel ? 1.0f : 0.65f, cpx = vpx * 1.48f;
                 int cbase = base + (int)(vpx * 0.05f);
                 Rgb cvc = sel ? C_CYAN : C_CYAN_MID;
@@ -1020,14 +1101,15 @@ static void draw_panel_words(int W, int H, float s) {
     /* ---- State note under the rows (right-aligned) ---- */
     char st_txt[160] = "";
     Rgb sc = C_MUTE; int mark = 0;                         /* 1 gold pending, 2 cyan applied */
-    if (g_lock_why[g_sel] == 1) { snprintf(st_txt, sizeof st_txt, "Set by environment variable %s", k_rows[g_sel].env); sc = C_MUTE; }
+    if (g_cap >= 0) { snprintf(st_txt, sizeof st_txt, "Waiting for controller button"); sc = C_GOLD; mark = 1; }
+    else if (g_lock_why[g_sel] == 1) { snprintf(st_txt, sizeof st_txt, "Set by environment variable %s", k_rows[g_sel].env); sc = C_MUTE; }
     else if (g_lock_why[g_sel] == 2) { snprintf(st_txt, sizeof st_txt, "Set by profile = low in graphics.ini"); sc = C_MUTE; }
     else if (row_restart(g_sel)) { snprintf(st_txt, sizeof st_txt, "Saved; applies %s", k_rows[g_sel].apply == A_SCALE ? "when this panel closes" : "at the next start"); sc = C_GOLD; mark = 1; }
-    else if (g_cur[g_sel] != g_start[g_sel] && k_rows[g_sel].apply != A_QUIT) { snprintf(st_txt, sizeof st_txt, "Applied and saved"); sc = C_CYAN; mark = 2; }
+    else if ((g_cur[g_sel] != g_start[g_sel] || (k_rows[g_sel].apply == A_PRESET && g_b_on != g_b_start_on)) && k_rows[g_sel].apply != A_QUIT && k_rows[g_sel].apply != A_PAGE) { snprintf(st_txt, sizeof st_txt, "Applied and saved"); sc = C_CYAN; mark = 2; }
     if (st_txt[0]) {
-        float px = 14.5f * s, w = text_w(&g_f_ui, st_txt, px, 0.3f * s);
-        int sb = y + (int)(22 * s);
-        if (sb > (int)(band_y - 8 * s)) sb = (int)(band_y - 8 * s);
+        float px = (g_page ? 13.5f : 14.5f) * s, w = text_w(&g_f_ui, st_txt, px, 0.3f * s);
+        int sb = y + (int)((g_page ? 16 : 22) * s);
+        if (sb > (int)(band_y - 6 * s)) sb = (int)(band_y - 6 * s);
         if (mark) diamond(cx1 - w - 13 * s, sb - px * 0.34f, 4.2f * s, sc, 0.35f);
         text(&g_f_ui, cx1 - w, sb, st_txt, px, sc, 0.3f * s);
     }
@@ -1037,7 +1119,7 @@ static void draw_panel_words(int W, int H, float s) {
     hfade_center((int)edge, (int)band_y, (int)pw, bh, C_BAND_GLOW, 0.24f);
     hfade_center((int)cx0, (int)band_y, (int)cw, 1, C_CYAN, 0.42f);
     hfade_center((int)cx0, (int)band_y + bh - 1, (int)cw, 1, C_CYAN, 0.42f);
-    const char *help = k_rows[g_sel].help;
+    const char *help = g_cap >= 0 ? "Press the controller button to assign to this action. Press Esc to cancel." : k_rows[g_sel].help;
     float hpx = 16.5f * s, hw = text_w(&g_f_ui, help, hpx, 0.3f * s);
     if (hw <= cw * 0.96f) {
         text(&g_f_ui, cx0 + (cw - hw) * 0.5f, (int)(band_y + bh * 0.5f + hpx * 0.35f), help, hpx, C_BAND_TXT, 0.3f * s);
@@ -1059,14 +1141,17 @@ static void draw_panel_words(int W, int H, float s) {
     int fb = (int)(foot_y + fh * 0.56f + 4 * s);
     text(&g_f_ui, cx0, fb, "F1  \xC2\xB7  Start + Select", 14.5f * s, C_MUTE, 0.4f * s);
     float fpx = 16.5f * s;
-    const char *act = k_rows[g_sel].apply == A_QUIT ? "Confirm" : "Change";
+    const char *act = k_rows[g_sel].apply == A_QUIT ? "Confirm"
+                    : k_rows[g_sel].apply == A_PAGE ? "Open"
+                    : k_rows[g_sel].apply == A_BIND ? "Rebind" : "Change";
+    const char *close_lbl = g_page ? "Back" : "Close";
     float wc = hint_btn(0, fb, fpx, g_swap ? 1 : 0, act, 0);
-    float wb = hint_btn(0, fb, fpx, g_swap ? 0 : 1, "Close", 0);
+    float wb = hint_btn(0, fb, fpx, g_swap ? 0 : 1, close_lbl, 0);
     float x = cx1 - wc - 28 * s - wb;
     hint_btn(x, fb, fpx, g_swap ? 1 : 0, act, 1);
     x += wc + 28 * s;
     g_close_r[0] = (int)(x - 10 * s); g_close_r[1] = (int)(foot_y + 6 * s); g_close_r[2] = (int)(wb + 20 * s); g_close_r[3] = (int)(fh - 12 * s);
-    hint_btn(x, fb, fpx, g_swap ? 0 : 1, "Close", 1);
+    hint_btn(x, fb, fpx, g_swap ? 0 : 1, close_lbl, 1);
 }
 
 /* ---- First-start shader preparation screen (nvn_vk_draw.c prep_first_hold) ----
@@ -1357,7 +1442,38 @@ int pcmenu_layer_read(int which, void *dst, int w, int h) {
 static void add_work(LONG bit) { LONG o; do o = g_work; while (InterlockedCompareExchange(&g_work, o | bit, o) != o); }
 static void set_value(int i, int k) {                    /* value k of row i: written, and applied where it can be */
     const Row *r = &k_rows[i];
-    if (g_lock_why[i] || k < 0 || k >= row_count(i) || k == g_cur[i]) return;
+    if (g_lock_why[i] || k < 0 || k >= row_count(i)) return;
+    if (r->apply == A_PAGE) return;
+    if (r->apply == A_BIND) {
+        if (k == g_cur[i] && g_b_on) return;
+        uint8_t next[16];
+        memcpy(next, g_b, 16);
+        rb_swap(next, r->slot, (uint8_t)k);
+        if (!nnpad_bind_set(next)) return;
+        memcpy(g_b, next, 16);
+        g_b_on = 1;
+        binds_sync();
+        printf("pcmenu: %s = %s (applied)\n", r->key, pad_name(k));
+        return;
+    }
+    if (r->apply == A_PRESET) {
+        if (k == g_cur[i]) return;
+        if (k == 0) {
+            if (!nnpad_bind_set(NULL)) return;
+            g_b_on = 0;
+            rb_preset(prompts_control_type(), g_b);
+        } else {
+            uint8_t next[16];
+            rb_preset(k - 1, next);
+            if (!nnpad_bind_set(next)) return;
+            memcpy(g_b, next, 16);
+            g_b_on = 1;
+        }
+        binds_sync();
+        printf("pcmenu: bind_preset = %s (applied)\n", r->val[k]);
+        return;
+    }
+    if (k == g_cur[i]) return;
     int ok;
     if (r->apply == A_SIZE) { char w[16], h[16]; sscanf(r->val[k], "%15[0-9]x%15[0-9]", w, h); ok = gfx_option_set("width", w) && gfx_option_set("height", h); }
     else if (r->apply == A_PROMPTS) { ok = nnpad_prompts_set(r->val[k]); g_fam = nnpad_button_prompts(); g_letter = nnpad_prompts_by_letter(); }      /* the hints and the bind names follow */
@@ -1385,7 +1501,7 @@ static int before2(double a0, double a1, double b0, double b1) { return a0 < b0 
 static int nearest(int i, int dir, int wrap) {
     double v0, v1, o0, o1, b0 = 0, b1 = 0;
     int n = row_count(i), best = -1, num = numbers2(g_raw[i], &v0, &v1), any = 0;      /* any: a row of numbers */
-    for (int k = 0; k < n && num; k++) {
+    for (int k = 0; k < n && num && k_rows[i].apply != A_BIND; k++) {
         if (!numbers2(k_rows[i].val[k], &o0, &o1)) continue;
         any = 1;
         if ((dir > 0 ? before2(v0, v1, o0, o1) : before2(o0, o1, v0, v1)) &&
@@ -1395,9 +1511,12 @@ static int nearest(int i, int dir, int wrap) {
 }
 static void change(int i, int dir, int wrap) {             /* wrap 0 (left / right): stops at the ends; 1 (A, a click): round */
     int n = row_count(i);
+    if (k_rows[i].apply == A_BIND) wrap = 1;
     set_value(i, g_cur[i] < 0 ? nearest(i, dir, wrap) : wrap ? (g_cur[i] + dir + n) % n : g_cur[i] + dir);
 }
 static int activate(int i, int dir) {                      /* A or a click on a row; 1 = it took the press and the row's value is not what changes */
+    if (k_rows[i].apply == A_PAGE) { page_go(1, 0); return 1; }
+    if (k_rows[i].apply == A_BIND) { g_cap = i; g_cap_t = GetTickCount64(); g_cap_armed = 0; return 1; }
     if (k_rows[i].apply == A_QUIT) {
         if (!g_quit_ask) { g_quit_ask = 1; return 1; }
         printf("pcmenu: Quit to desktop chosen\n");
@@ -1436,7 +1555,8 @@ static DWORD WINAPI menu_thread(LPVOID arg) {
         int up = (b & BUP) || ly > 16000 || nnhid_menu_key(VK_UP), down = (b & BDOWN) || ly < -16000 || nnhid_menu_key(VK_DOWN);
         int left = (b & BLEFT) || lx < -16000 || nnhid_menu_key(VK_LEFT), right = (b & BRIGHT) || lx > 16000 || nnhid_menu_key(VK_RIGHT);
         int ok = (b & BA) || nnhid_menu_key(VK_RETURN) || nnhid_menu_key(VK_SPACE);
-        int back = (b & BB) || nnhid_menu_key(VK_ESCAPE) || nnhid_menu_key(VK_BACK) || nnhid_menu_key(VK_F1) || (b & (BPLUS | BMINUS)) == (BPLUS | BMINUS);
+        int close_now = nnhid_menu_key(VK_F1) || (b & (BPLUS | BMINUS)) == (BPLUS | BMINUS);
+        int back = (b & BB) || nnhid_menu_key(VK_ESCAPE) || nnhid_menu_key(VK_BACK) || close_now;
         int dir = up ? 1 : down ? 2 : left ? 3 : right ? 4 : 0;
         ULONGLONG now = GetTickCount64();
         int step = dir && (dir != prev_dir || (rep_at && now >= t_dir + (ULONGLONG)rep_at));
@@ -1444,28 +1564,58 @@ static DWORD WINAPI menu_thread(LPVOID arg) {
         prev_dir = dir;
         mouse_at(&mx, &my, &md);
         AcquireSRWLockExclusive(&g_lock);
-        int was_sel = g_sel, was_cur[NROW];
+        if (g_cap >= 0) {                                  /* waiting for a controller button; what is held now must release first */
+            uint32_t p = nnhid_menu_pad();
+            int esc = nnhid_menu_key(VK_ESCAPE) || close_now;
+            g_cap_armed |= !p;
+            if (esc || now - g_cap_t > 8000 || (g_cap_armed && p)) {
+                if (!esc && p) {
+                    int k = 0;
+                    while (k < 15 && !(p >> k & 1)) k++;
+                    set_value(g_cap, k);
+                }
+                g_cap = -1; g_ver++;
+                prev_ok = 1; prev_back = 1; prev_dir = 0;
+            }
+            ReleaseSRWLockExclusive(&g_lock);
+            prev_click = md;
+            if (!InterlockedExchange(&g_job, 1) && !nvn_front_post_pcmenu()) InterlockedExchange(&g_job, 0);
+            Sleep(16);
+            continue;
+        }
+        int was_sel = g_sel, was_cur[NROW], was_page = g_page;
         memcpy(was_cur, g_cur, sizeof g_cur);
         if (step && (dir == 1 || dir == 2)) { do g_sel = (g_sel + (dir == 1 ? NROW - 1 : 1)) % NROW; while (!row_on(g_sel)); }
         if (step && (dir == 3 || dir == 4)) change(g_sel, dir == 3 ? -1 : 1, 0);
         if (ok && !prev_ok) { activate(g_sel, 1); g_ver++; }
         int px = mx - g_rect[0], py = my - g_rect[1], click = md && !prev_click;
-        if (mx >= 0 && (mx != mx0 || my != my0 || click) && px >= 0 && px < g_pw && py >= 0 && py < g_ph) {      /* the mouse: hover chooses, a click changes */
+        if (mx >= 0 && (mx != mx0 || my != my0 || click) && px >= 0 && px < g_pw && py >= 0 && py < g_ph && g_cap < 0) {      /* the mouse: hover chooses, a click changes */
             for (int i = 0; i < NROW; i++)                 /* a row's own span: the panel covers the window, its rows step down the diagonal */
                 if (g_row_y[i] >= 0 && py >= g_row_y[i] && py < g_row_y[i] + g_row_h && px >= g_row_x0[i] && px < g_row_x1[i]) {
                     g_sel = i;
-                    if (click && px >= g_val_x0[i] - g_row_h) { activate(i, px < g_val_x0[i] + g_row_h ? -1 : 1); g_ver++; break; }
+                    if (click && px >= g_val_x0[i] - g_row_h) {
+                        if (k_rows[i].apply == A_BIND) {
+                            if (px < g_val_x0[i] + g_row_h) change(i, -1, 1);
+                            else if (px > g_val_x1[i] - g_row_h) change(i, 1, 1);
+                            else activate(i, 1);
+                        } else {
+                            activate(i, px < g_val_x0[i] + g_row_h ? -1 : 1);
+                        }
+                        g_ver++; break;
+                    }
                 }
             if (click && px >= g_close_r[0] && px < g_close_r[0] + g_close_r[2] && py >= g_close_r[1] && py < g_close_r[1] + g_close_r[3]) back = 1, prev_back = 0;
         }
         mx0 = mx; my0 = my;
-        if (g_sel != was_sel || memcmp(was_cur, g_cur, sizeof g_cur)) g_ver++;
+        if (g_sel != was_sel || g_page != was_page || memcmp(was_cur, g_cur, sizeof g_cur)) g_ver++;
+        int do_back = back && !prev_back && !g_close_at;
+        if (do_back) {
+            if (g_page && !close_now) { page_go(0, 1); g_ver++; }
+            else { g_close_at = now; g_ver++; }            /* the closing plays (PCM_CLOSE_MS); the game goes on after it */
+        }
         ReleaseSRWLockExclusive(&g_lock);
         if (g_log && (step || (ok && !prev_ok) || (back && !prev_back) || click)) printf("pcmenu: input: %s%s%s%s -> row %d (%s)\n", step ? (dir == 1 ? "up " : dir == 2 ? "down " : dir == 3 ? "left " : "right ") : "", ok && !prev_ok ? "A " : "", back && !prev_back ? "B " : "", click ? "click " : "", g_sel, k_rows[g_sel].key);
         prev_ok = ok; prev_click = md;
-        if (back && !prev_back && !g_close_at) {
-            g_close_at = now; g_ver++;                    /* the closing plays (PCM_CLOSE_MS); the game goes on after it */
-        }
         prev_back = back;
         if (g_close_at && (now - g_close_at >= PCM_CLOSE_MS || !g_gpu)) break;
         if (!InterlockedExchange(&g_job, 1) && !nvn_front_post_pcmenu()) InterlockedExchange(&g_job, 0);
@@ -1492,8 +1642,9 @@ static void menu_open(const char *why) {
     g_swap = nnpad_menu_swapped();
     g_fam = nnpad_button_prompts();
     g_letter = nnpad_prompts_by_letter();
+    binds_load();
     g_open_at = GetTickCount64(); g_close_at = 0;
-    page_go();
+    page_go(0, 0);
     g_ver++;
     ReleaseSRWLockExclusive(&g_lock);
     InterlockedExchange(&g_guest_frozen, 1);               /* the game stops at its next SDK call (hostrt.c) */

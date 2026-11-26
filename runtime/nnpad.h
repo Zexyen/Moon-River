@@ -18,6 +18,9 @@ int  nnpad_button_prompts(void);                /* [Recomps#1] [general] button_
 void nnpad_prompts_used(int keyboard);          /* player 1 used a pad (0) or the keyboard / mouse (1): button_prompts = auto follows */
 int  nnpad_prompts_by_letter(void);             /* [Recomps#1] finding 148: player 1's face buttons by printed letter (A = the bottom button) */
 int  nnpad_menu_swapped(void);                  /* [moonriver] [general] swap_confirm, for the device in use: menus confirm with B, back with A */
+int  nnpad_bind_get(unsigned char *out);        /* [moonriver] [general] bind_controls: 1 = custom (out[0..15] filled), 0 = game's Control Type */
+int  nnpad_bind_set(const unsigned char *b);    /* NULL = back to game's Control Type; else writes a 16-button permutation to controllers.ini */
+int  nnpad_bind_live(void);                     /* 1 when custom gameplay rebinding is active for the controller in use (0 on keyboard) */
 int  nnpad_init(void);                           /* SDL up (no video, no window); 0 = failed. Also loads controllers.ini. */
 void nnpad_poll(int force);                      /* hot-plug, config reload; cheap when called often (at most once per ms) */
 int  nnpad_present(int player);                  /* a device is assigned to this player slot */

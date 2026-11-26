@@ -12,6 +12,7 @@
  * Uses only standard C / UCRT symbols and avoids TLS runtime dependencies so it links cleanly into both
  * Linux game.so and Windows -nostdlib game.dll (UCRT only). */
 #include "game_shim.c"
+#include "rebind.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -40,6 +41,15 @@ __declspec(dllexport) GameMvPair game_mv_pairs[1 << 16];
 /* [moonriver] Rich Presence state (runtime/achievements.c): chapter (-1 in menus, 0 Records of Time,
  * 1..17 story chapters, 22..26 Witch Trials I-V), difficulty (0..3), verse (0: none), reserved. */
 __declspec(dllexport) volatile int game_presence[4] = {-1, 0, 0, 0};
+
+/* [moonriver] Gameplay controller button rebinding (runtime/rebind.h, games/bayonetta2/runtime/prompts.c).
+ * game_rebind[logical] = physical Pro button 0..15; game_rebind_on = 1 while active for a controller;
+ * game_control_type = the save's built-in Control Type (0=A..3=D) reported back to PC Settings. */
+__declspec(dllexport) volatile uint8_t game_rebind[16] = {
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+};
+__declspec(dllexport) volatile int game_rebind_on;
+__declspec(dllexport) volatile int game_control_type;
 
 /* ============================================================================
  * 0. Recomp Achievements (docs/ACHIEVEMENTS.md)
@@ -733,4 +743,115 @@ unsigned recomps_uw_width(void) {
         if (w <= 1280 || w > 8192) w = 0;
     }
     return (unsigned)w;
+}
+
+/* ============================================================================
+ * 5. Gameplay controller button rebinding (runtime/rebind.h)
+ * ============================================================================ */
+static void rebind_snapshot(uint8_t out[16]) {
+    for (int i = 0; i < 16; i++) out[i] = game_rebind[i];
+}
+
+/* True while the player is in active gameplay (combat, exploration, QTEs) rather than
+ * Title / Chapter Select / Gates of Hell / Pause / Subscreen / Yes-No dialogs. */
+static int rebind_gameplay_focus(void) {
+    uint64_t pm = rd64(0x71018668f8ULL);
+    if (!pm || rd64(pm + 48ULL) == 0) return 0;            /* no active player object */
+    uint64_t st = rd64(0x71018668e0ULL);
+    if (!st) return 0;
+    if (rd8(st + 2ULL) & 0x40u) return 0;                  /* paused / frozen */
+    if (rd32(st + 8ULL) & 0x20000000u) return 0;           /* menu / subscreen / shop / UI open */
+    uint64_t dlg = rd64(0x710186d260ULL);
+    if (dlg && rd32(dlg) != 0) return 0;                   /* system / yes-no dialog open */
+    return 1;
+}
+
+/* Called once per frame right after f_7100969c90 updates the game's pad buffers. */
+void recomps_rebind_pad(Ctx *c) {
+    (void)c;
+    static int s_was_active;
+    static uint32_t s_prev_out;
+
+    uint64_t save = rd64(0x71018668d0ULL);
+    if (save) {
+        uint32_t ct = rd32(save + 292ULL);
+        game_control_type = ct < 4u ? (int)ct : 0;
+    }
+
+    uint64_t pad = rd64(0x7101866998ULL);
+    if (!pad) return;
+
+    int active = game_rebind_on && rebind_gameplay_focus();
+    if (active) {
+        uint8_t r[16];
+        rebind_snapshot(r);
+        if (!rb_valid(r)) { s_was_active = 0; return; }
+        uint32_t held = rd32(pad + 0ULL);
+        uint32_t rep  = rd32(pad + 12ULL);
+        uint32_t out  = rb_to_game(r, held);
+        uint32_t trig = 0, rel = 0, out_rep = 0;
+        if (s_was_active) {
+            uint32_t diff = s_prev_out ^ out;
+            trig = diff & out;
+            rel  = diff & s_prev_out;
+            out_rep = (rb_to_game(r, rep) & out) | trig;
+        }
+        s_prev_out = out;
+        s_was_active = 1;
+        wr32(pad + 0ULL,  out);
+        wr32(pad + 4ULL,  trig);
+        wr32(pad + 8ULL,  rel);
+        wr32(pad + 12ULL, out_rep);
+    } else if (s_was_active) {
+        /* Suppress edges on the exact gameplay -> menu transition frame so a rebound Pause/Subscreen
+         * button does not also fire Confirm/Cancel on frame 1 of the newly opened menu. */
+        wr32(pad + 4ULL,  0u);
+        wr32(pad + 8ULL,  0u);
+        wr32(pad + 12ULL, 0u);
+        s_was_active = 0;
+    }
+}
+
+/* Called at the end of f_7100d900c8 and f_7100d900dc: when custom rebinding is active, gameplay
+ * queries see Type A's action table (so rb_to_game matches 100%), while the HUD Umbran Climax
+ * badge (L/R/ZL/ZR sprites only) follows whichever shoulder button Umbran Climax is bound to. */
+void recomps_rebind_action(Ctx *c, int for_p1) {
+    if (!game_rebind_on || !for_p1) return;
+    uint64_t save = rd64(0x71018668d0ULL);
+    uint32_t act = (uint32_t)c->x[1];
+    if (!save || act >= 16u) return;
+    uint64_t lr = c->x[30];
+    if (act == 14u && (lr == 0x7100c9a5b8ULL || lr == 0x7100c9b5e8ULL ||
+                       lr == 0x7100d3737cULL || lr == 0x7100d373d8ULL || lr == 0x7100d3741cULL)) {
+        uint8_t phys = game_rebind[RB_L];
+        if (phys >= RB_L && phys <= RB_ZR) { c->x[0] = rb_game_bit[phys]; return; }
+    }
+    c->x[0] = rd32(save + 36ULL + (uint64_t)act * 4ULL);
+}
+
+/* Called at entry to f_7100bd1b0c (inline button-prompt table lookup):
+ *   - Dynamic gameplay IDs 102/113/114/115 (Weapon Set, Umbran Climax, Dodge, Lock-On) always remap;
+ *   - Fixed gameplay IDs (2..9, 13..16, 18, 20, 21, 22) remap during gameplay while menu buttons
+ *     (and IDs 0 Confirm / 1 Cancel everywhere) stay untouched. */
+void recomps_rebind_guide_entry(Ctx *c) {
+    if (!game_rebind_on) return;
+    uint32_t id = (uint32_t)c->x[0];
+    if (id == 102u) id = 9u;
+    else if (id == 113u) id = 8u;
+    else if (id == 114u) id = 7u;
+    else if (id == 115u) id = 6u;
+    else if (!rebind_gameplay_focus()) return;
+    uint8_t r[16];
+    rebind_snapshot(r);
+    if (!rb_valid(r)) return;
+    c->x[0] = rb_btn_id(r, id);
+}
+
+/* Called right before the 0x7101537d88 binary search in f_7100d69b34 / f_7100d693cc (Combo / Technique list). */
+void recomps_rebind_combo_id(Ctx *c) {
+    if (!game_rebind_on) return;
+    uint8_t r[16];
+    rebind_snapshot(r);
+    if (!rb_valid(r)) return;
+    c->x[8] = rb_btn_id(r, (uint32_t)c->x[8]);
 }
