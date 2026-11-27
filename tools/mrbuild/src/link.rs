@@ -56,6 +56,7 @@ const HOST_SOURCES: &[&str] = &[
     "nnmovie.c",
     "nnmisc.c",
     "nnaudio.c",
+    "plat_audio_sdl.c",
     "nnmovie_mf.c",
     "nniostream.c",
     "nncxxrt.c",
@@ -102,7 +103,7 @@ const RL_ACH_SOURCES: &[&str] = &[
     "third_party/rl_achievements/third_party/rcheevos/src/util/rc_util.c",
     "third_party/rl_achievements/third_party/rcheevos/src/util/rc_version.c",
 ];
-const POSIX_SOURCES: &[&str] = &["plat_posix.c", "plat_audio_sdl.c"];
+const POSIX_SOURCES: &[&str] = &["plat_posix.c"];
 /// the player's tables, compiled on their PC into game.so: the dump's sdk data, the lifted sdk code, and the values
 /// the runtime reads (runtime/split)
 pub const TABLE_SOURCES: &[&str] = &["gen/sdkdata.c", "gen/sdklift_gen.c", "mr_tables.c"];
@@ -964,7 +965,8 @@ mod tests {
     fn table_flags_unchanged() {
         let win = ["-O1", "-g", "-Wno-everything", "-fno-strict-aliasing", "-mcx16"];
         assert_eq!(table_flags(Target::Windows), win);
-        assert_eq!(table_flags(Target::Linux), [&win[..], &["-fPIC", "-D__declspec(x)="]].concat());
+        let cpu = if cfg!(target_arch = "aarch64") { "-mno-outline-atomics" } else { "-mcx16" }; // Linux: this PC's own processor
+        assert_eq!(table_flags(Target::Linux), [&win[..4], &[cpu, "-fPIC", "-D__declspec(x)="]].concat());
         assert_eq!(table_flags(Target::MacOS), [&win[..4], &["-fPIC", "-D__declspec(x)="]].concat());
     }
 

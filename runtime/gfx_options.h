@@ -18,14 +18,12 @@ typedef struct {
     int shader_prepare;     /* track V session 14 (appended: older objects keep their offsets): 0 first_run (the game is held at its first frame until every shader of the game's data is prepared, once per GPU + driver), 1 background (as before), 2 off;  env MR_VK_PREPARE wins */
     int aspect_stretch;     /* [Recomps#1] aspect = keep (0, default: the picture keeps its shape, black bars on a wider or taller
                                window, e.g. an ultrawide monitor) | stretch (1: it fills the window); nvn_vk_draw.c present (Vulkan) */
-    int frame_rate;         /* [Recomps#1] frame_rate = 60 (the game as made) .. 120: above 60 the lifted frame-rate patch is on, capped there */
+    int frame_rate;         /* [Recomps#1] frame_rate = 30 .. 960 (default 60): paced there, keeping real time */
     int hdr;                /* [Recomps#1] hdr = auto (0: HDR output while Windows HDR is on for the window's monitor) | off (1) | on (2: always);
                                nvn_vk_draw.c hdr_* (Vulkan on Windows; finding 147) */
     int hdr_scrgb;          /* [Recomps#1] hdr_format = hdr10 (0: 10-bit PQ, BT.2020) | scrgb (1: 16-bit floating point, linear) */
     float hdr_paper_white;  /* [Recomps#1] hdr_paper_white: the game's white in nits (80 .. 1000); 0 = auto: Windows' SDR content brightness */
     int hdr_srgb;           /* [Recomps#1] hdr_gamma = 2.2 (0: the game's values read as an SDR monitor shows them) | srgb (1: as Windows shows SDR apps) */
-    int cutscene_fps;       /* [moonriver] cutscene_fps = 30 (the game's 30 fps mode on the title, in menus and cutscenes, as on the console) | 60;
-                             * env MR_CUTSCENE_FPS wins; read by game_shim_eh.c h_fps_mode_set through that variable */
     float texture_lod_bias; /* [moonriver] the mip bias, -1 (0 = the game's own; no key since 2026-11-10); added to every sampler that uses
                              * mip maps (nvn_vk_draw.c sampler_get); env MR_TEXTURE_LOD_BIAS wins */
     int model_lod_high;     /* [moonriver] model_lod = game (0) | highest (1); game_shim_eh.c h_model_lod through MR_MODEL_LOD */
@@ -34,13 +32,17 @@ typedef struct {
                              * RECOMPS_ASPECT (game_shim_eh.c, r2_imports.c, nvn_vk_draw.c rs_xstretch), which wins when set */
     int hud_centre;         /* [moonriver] hud_area = screen (0: wider than 16:9 the HUD's corners go to the screen's edges) | 16:9 (1: kept in the middle);
                              * handed on as RECOMPS_HUD_CENTRE=1 (game_shim_eh.c h_ui_element) */
-    int upscaler;           /* [moonriver] issue 118: upscaler = off (0) | fsr3 (1: FSR 3.1 as anti-aliasing, nvn_vk_fsr.c) | fsr3_quality (2) | fsr3_balanced (3)
-                               | fsr3_performance (4) | fsr3_ultra_performance (5): FSR 3.1 upscaling to the internal resolution; env MR_UPSCALER wins */
+    int upscaler;           /* [moonriver] issue 118: upscaler = off (0) | fsr3..fsr3_ultra_performance (1..5) | dlaa..dlss_ultra_performance (6..10) | fsr4..fsr4_ultra_performance (11..15); env MR_UPSCALER wins */
+    float sharpness;        /* [moonriver] sharpness = 0 .. 100 in the file, 0 .. 1 here; 0 = off. RCAS sharpening after the upscaler (nvn_vk_fsr.c); env MR_SHARPNESS wins */
+    int frame_gen_no_hud;   /* [moonriver] frame_generation_hud = on | off: off = generator is not given the picture without the HUD (nvn_vk_fg.c fg_draw) */
+    int frame_gen_on, frame_gen_kind;      /* [moonriver] the file's frame_generation = off | on and frame_generator = fsr (1) | dlss (2) */
+    int frame_gen;          /* [moonriver] what runs: 0 off | 1 fsr | 2 dlss (nvn_vk_fg.c); env MR_FRAMEGEN = off | on | fsr | dlss | test (3) wins */
     float hdr_peak;         /* [moonriver] hdr_peak: the scene's brightest parts in nits with HDR on (80 .. 10000); 0 = auto (nvn_vk_draw.c hdr_var) */
     int wide_width;         /* [Recomps#1] aspect = wide: the game's render width on an ultrawide monitor (0 = 16:9) */
+    char language[16];      /* [moonriver] language = auto ("") or a language code (en-US, fr, ...); env MR_LANGUAGE wins (nnmisc.c) */
 } GfxOptions;
 const GfxOptions *gfx_options(void);      /* any thread; read once (the file is written with defaults when it does not exist) */
-int gfx_pace_rate(void);                  /* [Recomps#1] the rate display.c paces the game at: 60, or frame_rate above 60 (MR_PACE_120=0: 60 and the lifted limiter) */
+int gfx_pace_rate(void);                  /* [Recomps#1] the rate display.c paces the game at: frame_rate (30 .. 960; MR_PACE_120=0 above 60: 60) */
 int gfx_ini_refresh(const char *path);                   /* [moonriver] a new version's comments and keys in the player's file, values kept; 1 = rewritten */
 void gfx_aspect_window(int w, int h);     /* [moonriver] aspect_ratio = auto: the window's client size, before the game starts (display.c) */
 int gfx_ini_get(const char *key, char *out, size_t n);      /* [moonriver] graphics.ini's value of a key as the reader sees it; 0 = not in the file */

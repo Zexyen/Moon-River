@@ -37,7 +37,37 @@ static int read_line(int fd, char *buf, size_t cap) {
     return (int)n;
 }
 
-int main(void) {
+/* The hosted list, from the table. shortcut: no JSON escaping, add it when a title or description gets a " or a \ */
+#define MR_ACH_LIST "docs/achievements.json"
+#define MR_ACH_LIST_VERSIONS ">=0.4.0" /* the first release that fires events (v0.3.0 sent native ids) */
+static size_t list_json(char *out, size_t cap) {
+    size_t n = (size_t)snprintf(out, cap, "{\n  \"format\": 1,\n  \"game\": \"moon-river\",\n  \"source\": \"events\",\n"
+                                "  \"console\": \"switch\",\n  \"versions\": \"%s\",\n  \"achievements\": [\n", MR_ACH_LIST_VERSIONS);
+    for (uint32_t i = 0; i < MR_ACH_COUNT; i++) {
+        const MrAchDef *d = &mr_ach_defs[i];
+        /* Beaten = the 17 chapter clears + Sovereign Power; the rest only counts for Mastered */
+        const char *type = d->id <= MR_ACH_STORY_CHAPTERS ? ", \"type\": \"progression\"" : d->id == MR_ACH_ID_COMPLETE_GAME ? ", \"type\": \"win\"" : "";
+        assert(d->score == 5 || d->score == 10 || d->score == 25 || d->score == 50);
+        n += (size_t)snprintf(out + n, cap - n, "    {\"id\": %u, \"title\": \"%s\", \"description\": \"%s\", \"points\": %u%s, \"event\": \"%s\"}%s\n",
+                              d->id, d->title, d->desc, d->score, type, d->event, i + 1 < MR_ACH_COUNT ? "," : "");
+        assert(n < cap);
+    }
+    return n + (size_t)snprintf(out + n, cap - n, "  ]\n}\n");
+}
+
+int main(int argc, char **argv) {
+    /* 0. docs/achievements.json is the table */
+    {
+        static char want[32768], got[32768];
+        size_t n = list_json(want, sizeof want);
+        FILE *f = fopen(MR_ACH_LIST, argc > 1 && !strcmp(argv[1], "--write") ? "wb" : "rb");
+        if (!f) { perror(MR_ACH_LIST); return 1; }
+        if (argc > 1) { fwrite(want, 1, n, f); fclose(f); return 0; }
+        size_t k = fread(got, 1, sizeof got - 1, f);
+        fclose(f);
+        if (k != n || memcmp(want, got, n)) { fprintf(stderr, MR_ACH_LIST " differs from mr_ach_defs: run this test with --write\n"); return 1; }
+    }
+
     /* 1. Version string normalization */
     assert(!strcmp(ach_version_string("v0.1.0"), "0.1.0"));
     assert(!strcmp(ach_version_string("1.2.3"), "1.2.3"));
@@ -57,7 +87,7 @@ int main(void) {
             assert(mr_ach_defs[i].id == MR_ACH_BASE + i);
             total_score += mr_ach_defs[i].score;
         }
-        assert(total_score == 1710u);
+        assert(total_score == 1305u);
 
         /* Clearing a single chapter on 1st Climax unlocks only that chapter */
         s.story[0][0] = MR_ACH_MEDAL_STONE;
@@ -151,7 +181,6 @@ int main(void) {
     unsetenv("RL_SESSION");
     achievements_start();
     assert(!g_ach_enabled && !g_ach_inited);
-    achievements_event(ACH_EV_DEFINE, 1, "Prologue Clear", "Test", 15);
     achievements_event(ACH_EV_READY, 0, NULL, NULL, 0);
     achievements_event(ACH_EV_UNLOCK, 1, NULL, NULL, 0);
     achievements_event(ACH_EV_FRAME, 0, NULL, NULL, 0);
@@ -176,9 +205,6 @@ int main(void) {
     achievements_start();
     assert(g_ach_enabled && !g_ach_inited);
 
-    /* Queue definitions before ready so hello + one complete native_list go out together */
-    achievements_event(ACH_EV_DEFINE, 1, "Prologue Clear", "Complete Prologue: World of Chaos on any difficulty.", 15);
-    achievements_event(ACH_EV_DEFINE, 18, "Sovereign Power", "Complete all 17 story chapters on any difficulty.", 50);
     achievements_event(ACH_EV_READY, 0, NULL, NULL, 0);
     assert(g_ach_inited && rl_ach_connected());
 
@@ -186,39 +212,40 @@ int main(void) {
     assert(cli >= 0);
 
     char line[4096];
-    /* First two messages MUST be hello, then one native_list */
+    /* hello first; the list is hosted, so no native_list follows */
     assert(read_line(cli, line, sizeof line) > 0);
     has(line, "\"t\":\"hello\"", 1);
     has(line, "\"console\":\"switch\"", 1);
     has(line, "\"game\":\"moon-river\"", 1);
     has(line, "\"version\":\"0.1.0\"", 1);
 
-    assert(read_line(cli, line, sizeof line) > 0);
-    has(line, "\"t\":\"native_list\"", 1);
-    has(line, "\"id\":1", 1);
-    has(line, "\"title\":\"Prologue Clear\"", 1);
-    has(line, "\"description\":\"Complete Prologue: World of Chaos on any difficulty.\"", 1);
-    has(line, "\"id\":18", 1);
-    has(line, "\"gamerscore\":50", 1);
-
-    /* Save loaded -> save_loaded message + grace window classifies polled unlock as earlier */
+    /* Save loaded -> save_loaded message; a polled unlock in the grace window follows it as an event */
     achievements_save_loaded();
     assert(read_line(cli, line, sizeof line) > 0);
     has(line, "\"t\":\"save_loaded\"", 1);
 
     achievements_event(ACH_EV_BITFIELD, 1, NULL, NULL, 1);
     assert(read_line(cli, line, sizeof line) > 0);
-    has(line, "\"t\":\"native\"", 1);
-    has(line, "\"id\":1", 1);
-    has(line, "\"earlier\":true", 1);
+    has(line, "\"t\":\"event\"", 1);
+    has(line, "\"name\":\"prologue_clear\"", 1);
 
     /* Live unlock after save-load grace window ends */
     __atomic_store_n(&g_ach_save_grace, 0, __ATOMIC_RELEASE);
     achievements_event(ACH_EV_UNLOCK, 18, NULL, NULL, 0);
     assert(read_line(cli, line, sizeof line) > 0);
-    has(line, "\"t\":\"native\"", 1);
-    has(line, "\"id\":18", 1);
-    has(line, "\"earlier\":true", 0);
+    has(line, "\"t\":\"event\"", 1);
+    has(line, "\"name\":\"sovereign_power\"", 1);
+
+    /* Progress found in the menus outside the grace window came from a save: save_loaded goes first */
+    achievements_event(ACH_EV_BITFIELD, 2, NULL, NULL, 1);
+    assert(read_line(cli, line, sizeof line) > 0);
+    has(line, "\"t\":\"save_loaded\"", 1);
+    assert(read_line(cli, line, sizeof line) > 0);
+    has(line, "\"name\":\"chapter_1_clear\"", 1);
+    __atomic_store_n(&g_ach_save_grace, 0, __ATOMIC_RELEASE);
+
+    /* An id outside the list sends nothing (the next line read is the casual message) */
+    achievements_event(ACH_EV_UNLOCK, 51, NULL, NULL, 0);
 
     /* Casual voiding */
     achievements_event(ACH_EV_CASUAL, 0, "debug", NULL, 0);

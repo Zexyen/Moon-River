@@ -51,71 +51,74 @@ static const uint32_t mr_ach_witch_trial_chapters[MR_ACH_WITCH_TRIALS] = {
  * temporary Star Fox costume weapon ID 11 (Arwing). */
 #define MR_ACH_ALL_WEAPONS_MASK 0xff8f0000u
 
+#define MR_ACH_ID_COMPLETE_GAME 18u
+
 typedef struct {
     uint32_t id;
     const char *title;
     const char *desc;
     uint32_t score;
+    const char *event;
 } MrAchDef;
 
 static const MrAchDef mr_ach_defs[MR_ACH_COUNT] = {
     /* 1..17: Story Chapter Clears (any difficulty) */
-    { 1,  "Prologue Clear",              "Complete Prologue: World of Chaos on any difficulty.",                                15},
-    { 2,  "Chapter I Clear",             "Complete Chapter I: Noatun, The City of Genesis on any difficulty.",                  15},
-    { 3,  "Chapter II Clear",            "Complete Chapter II: A Remembrance of Time on any difficulty.",                       15},
-    { 4,  "Chapter III Clear",           "Complete Chapter III: Paradiso - The Gates of Paradise on any difficulty.",           15},
-    { 5,  "Chapter IV Clear",            "Complete Chapter IV: The Two Meet on any difficulty.",                                15},
-    { 6,  "Chapter V Clear",             "Complete Chapter V: The Cathedral of Cascades on any difficulty.",                    15},
-    { 7,  "Chapter VI Clear",            "Complete Chapter VI: The Bridge to the Heavens on any difficulty.",                   15},
-    { 8,  "Chapter VII Clear",           "Complete Chapter VII: The Ark on any difficulty.",                                    15},
-    { 9,  "Chapter VIII Clear",          "Complete Chapter VIII: An Ancient Civilization on any difficulty.",                   15},
-    {10,  "Chapter IX Clear",            "Complete Chapter IX: The Gates of Hell on any difficulty.",                           15},
-    {11,  "Chapter X Clear",             "Complete Chapter X: The Depths on any difficulty.",                                   15},
-    {12,  "Chapter XI Clear",            "Complete Chapter XI: Inferno and Its Ruler on any difficulty.",                       15},
-    {13,  "Chapter XII Clear",           "Complete Chapter XII: The Lumen Sage on any difficulty.",                             15},
-    {14,  "Chapter XIII Clear",          "Complete Chapter XIII: Vigrid, City of D\xc3\xa9j\xc3\xa0 Vu on any difficulty.",     15},
-    {15,  "Chapter XIV Clear",           "Complete Chapter XIV: The Witch Hunts on any difficulty.",                            15},
-    {16,  "Chapter XV Clear",            "Complete Chapter XV: Truth on any difficulty.",                                       15},
-    {17,  "Chapter XVI Clear",           "Complete Chapter XVI: Sovereign Power on any difficulty.",                            15},
+    { 1,  "Prologue Clear",              "Complete Prologue: World of Chaos on any difficulty.",                                10, "prologue_clear"},
+    { 2,  "Chapter I Clear",             "Complete Chapter I: Noatun, The City of Genesis on any difficulty.",                  10, "chapter_1_clear"},
+    { 3,  "Chapter II Clear",            "Complete Chapter II: A Remembrance of Time on any difficulty.",                       10, "chapter_2_clear"},
+    { 4,  "Chapter III Clear",           "Complete Chapter III: Paradiso - The Gates of Paradise on any difficulty.",           10, "chapter_3_clear"},
+    { 5,  "Chapter IV Clear",            "Complete Chapter IV: The Two Meet on any difficulty.",                                10, "chapter_4_clear"},
+    { 6,  "Chapter V Clear",             "Complete Chapter V: The Cathedral of Cascades on any difficulty.",                    10, "chapter_5_clear"},
+    { 7,  "Chapter VI Clear",            "Complete Chapter VI: The Bridge to the Heavens on any difficulty.",                   10, "chapter_6_clear"},
+    { 8,  "Chapter VII Clear",           "Complete Chapter VII: The Ark on any difficulty.",                                    10, "chapter_7_clear"},
+    { 9,  "Chapter VIII Clear",          "Complete Chapter VIII: An Ancient Civilization on any difficulty.",                   10, "chapter_8_clear"},
+    {10,  "Chapter IX Clear",            "Complete Chapter IX: The Gates of Hell on any difficulty.",                           10, "chapter_9_clear"},
+    {11,  "Chapter X Clear",             "Complete Chapter X: The Depths on any difficulty.",                                   10, "chapter_10_clear"},
+    {12,  "Chapter XI Clear",            "Complete Chapter XI: Inferno and Its Ruler on any difficulty.",                       10, "chapter_11_clear"},
+    {13,  "Chapter XII Clear",           "Complete Chapter XII: The Lumen Sage on any difficulty.",                             10, "chapter_12_clear"},
+    {14,  "Chapter XIII Clear",          "Complete Chapter XIII: Vigrid, City of D\xc3\xa9j\xc3\xa0 Vu on any difficulty.",     10, "chapter_13_clear"},
+    {15,  "Chapter XIV Clear",           "Complete Chapter XIV: The Witch Hunts on any difficulty.",                            10, "chapter_14_clear"},
+    {16,  "Chapter XV Clear",            "Complete Chapter XV: Truth on any difficulty.",                                       10, "chapter_15_clear"},
+    {17,  "Chapter XVI Clear",           "Complete Chapter XVI: Sovereign Power on any difficulty.",                            10, "chapter_16_clear"},
     /* 18..21: Game Completion, Difficulty & Platinum Mastery (higher difficulties retroactively unlock lower ones) */
-    {18,  "Sovereign Power",             "Complete all 17 story chapters on any difficulty.",                                   50},
-    {19,  "3rd Climax Witch",            "Complete all 17 story chapters on 3rd Climax or higher.",                             75},
-    {20,  "Infinite Climax",             "Complete all 17 story chapters on \xe2\x88\x9e Climax.",                             100},
-    {21,  "Platinum Witch",              "Earn a Platinum or Pure Platinum award on all 17 story chapters (any difficulty).",  100},
+    {18,  "Sovereign Power",             "Complete all 17 story chapters on any difficulty.",                                   50, "sovereign_power"},
+    {19,  "3rd Climax Witch",            "Complete all 17 story chapters on 3rd Climax or higher.",                             50, "3rd_climax_witch"},
+    {20,  "Infinite Climax",             "Complete all 17 story chapters on \xe2\x88\x9e Climax.",                              50, "infinite_climax"},
+    {21,  "Platinum Witch",              "Earn a Platinum or Pure Platinum award on all 17 story chapters (any difficulty).",   50, "platinum_witch"},
     /* 22..38: Infinite Climax Pure Platinum Chapter Mastery */
-    {22,  "Prologue: Pure Climax",       "Earn a Pure Platinum award in Prologue: World of Chaos on \xe2\x88\x9e Climax.",                                25},
-    {23,  "Chapter I: Pure Climax",      "Earn a Pure Platinum award in Chapter I: Noatun, The City of Genesis on \xe2\x88\x9e Climax.",                  25},
-    {24,  "Chapter II: Pure Climax",     "Earn a Pure Platinum award in Chapter II: A Remembrance of Time on \xe2\x88\x9e Climax.",                       25},
-    {25,  "Chapter III: Pure Climax",    "Earn a Pure Platinum award in Chapter III: Paradiso - The Gates of Paradise on \xe2\x88\x9e Climax.",           25},
-    {26,  "Chapter IV: Pure Climax",     "Earn a Pure Platinum award in Chapter IV: The Two Meet on \xe2\x88\x9e Climax.",                                25},
-    {27,  "Chapter V: Pure Climax",      "Earn a Pure Platinum award in Chapter V: The Cathedral of Cascades on \xe2\x88\x9e Climax.",                    25},
-    {28,  "Chapter VI: Pure Climax",     "Earn a Pure Platinum award in Chapter VI: The Bridge to the Heavens on \xe2\x88\x9e Climax.",                   25},
-    {29,  "Chapter VII: Pure Climax",    "Earn a Pure Platinum award in Chapter VII: The Ark on \xe2\x88\x9e Climax.",                                    25},
-    {30,  "Chapter VIII: Pure Climax",   "Earn a Pure Platinum award in Chapter VIII: An Ancient Civilization on \xe2\x88\x9e Climax.",                   25},
-    {31,  "Chapter IX: Pure Climax",     "Earn a Pure Platinum award in Chapter IX: The Gates of Hell on \xe2\x88\x9e Climax.",                           25},
-    {32,  "Chapter X: Pure Climax",      "Earn a Pure Platinum award in Chapter X: The Depths on \xe2\x88\x9e Climax.",                                   25},
-    {33,  "Chapter XI: Pure Climax",     "Earn a Pure Platinum award in Chapter XI: Inferno and Its Ruler on \xe2\x88\x9e Climax.",                       25},
-    {34,  "Chapter XII: Pure Climax",    "Earn a Pure Platinum award in Chapter XII: The Lumen Sage on \xe2\x88\x9e Climax.",                             25},
-    {35,  "Chapter XIII: Pure Climax",   "Earn a Pure Platinum award in Chapter XIII: Vigrid, City of D\xc3\xa9j\xc3\xa0 Vu on \xe2\x88\x9e Climax.",     25},
-    {36,  "Chapter XIV: Pure Climax",    "Earn a Pure Platinum award in Chapter XIV: The Witch Hunts on \xe2\x88\x9e Climax.",                            25},
-    {37,  "Chapter XV: Pure Climax",     "Earn a Pure Platinum award in Chapter XV: Truth on \xe2\x88\x9e Climax.",                                       25},
-    {38,  "Chapter XVI: Pure Climax",    "Earn a Pure Platinum award in Chapter XVI: Sovereign Power on \xe2\x88\x9e Climax.",                            25},
+    {22,  "Prologue: Pure Climax",       "Earn a Pure Platinum award in Prologue: World of Chaos on \xe2\x88\x9e Climax.",                                25, "prologue_pure_climax"},
+    {23,  "Chapter I: Pure Climax",      "Earn a Pure Platinum award in Chapter I: Noatun, The City of Genesis on \xe2\x88\x9e Climax.",                  25, "chapter_1_pure_climax"},
+    {24,  "Chapter II: Pure Climax",     "Earn a Pure Platinum award in Chapter II: A Remembrance of Time on \xe2\x88\x9e Climax.",                       25, "chapter_2_pure_climax"},
+    {25,  "Chapter III: Pure Climax",    "Earn a Pure Platinum award in Chapter III: Paradiso - The Gates of Paradise on \xe2\x88\x9e Climax.",           25, "chapter_3_pure_climax"},
+    {26,  "Chapter IV: Pure Climax",     "Earn a Pure Platinum award in Chapter IV: The Two Meet on \xe2\x88\x9e Climax.",                                25, "chapter_4_pure_climax"},
+    {27,  "Chapter V: Pure Climax",      "Earn a Pure Platinum award in Chapter V: The Cathedral of Cascades on \xe2\x88\x9e Climax.",                    25, "chapter_5_pure_climax"},
+    {28,  "Chapter VI: Pure Climax",     "Earn a Pure Platinum award in Chapter VI: The Bridge to the Heavens on \xe2\x88\x9e Climax.",                   25, "chapter_6_pure_climax"},
+    {29,  "Chapter VII: Pure Climax",    "Earn a Pure Platinum award in Chapter VII: The Ark on \xe2\x88\x9e Climax.",                                    25, "chapter_7_pure_climax"},
+    {30,  "Chapter VIII: Pure Climax",   "Earn a Pure Platinum award in Chapter VIII: An Ancient Civilization on \xe2\x88\x9e Climax.",                   25, "chapter_8_pure_climax"},
+    {31,  "Chapter IX: Pure Climax",     "Earn a Pure Platinum award in Chapter IX: The Gates of Hell on \xe2\x88\x9e Climax.",                           25, "chapter_9_pure_climax"},
+    {32,  "Chapter X: Pure Climax",      "Earn a Pure Platinum award in Chapter X: The Depths on \xe2\x88\x9e Climax.",                                   25, "chapter_10_pure_climax"},
+    {33,  "Chapter XI: Pure Climax",     "Earn a Pure Platinum award in Chapter XI: Inferno and Its Ruler on \xe2\x88\x9e Climax.",                       25, "chapter_11_pure_climax"},
+    {34,  "Chapter XII: Pure Climax",    "Earn a Pure Platinum award in Chapter XII: The Lumen Sage on \xe2\x88\x9e Climax.",                             25, "chapter_12_pure_climax"},
+    {35,  "Chapter XIII: Pure Climax",   "Earn a Pure Platinum award in Chapter XIII: Vigrid, City of D\xc3\xa9j\xc3\xa0 Vu on \xe2\x88\x9e Climax.",     25, "chapter_13_pure_climax"},
+    {36,  "Chapter XIV: Pure Climax",    "Earn a Pure Platinum award in Chapter XIV: The Witch Hunts on \xe2\x88\x9e Climax.",                            25, "chapter_14_pure_climax"},
+    {37,  "Chapter XV: Pure Climax",     "Earn a Pure Platinum award in Chapter XV: Truth on \xe2\x88\x9e Climax.",                                       25, "chapter_15_pure_climax"},
+    {38,  "Chapter XVI: Pure Climax",    "Earn a Pure Platinum award in Chapter XVI: Sovereign Power on \xe2\x88\x9e Climax.",                            25, "chapter_16_pure_climax"},
     /* 39..40: Secret Boss & Boss Mastery */
-    {39,  "Devil's Duel",                "Defeat Rodin in the Platinum Ticket battle.",                                        100},
-    {40,  "Darkness Envelops Light",     "Defeat Balder in Chapter XII without taking damage.",                                 50},
+    {39,  "Devil's Duel",                "Defeat Rodin in the Platinum Ticket battle.",                                         50, "devils_duel"},
+    {40,  "Darkness Envelops Light",     "Defeat Balder in Chapter XII without taking damage.",                                 50, "darkness_envelops_light"},
     /* 41..44: Arsenal, Techniques & Exploration */
-    {41,  "Arsenal of Darkness",         "Unlock all 13 Bayonetta 2 weapons.",                                                  50},
-    {42,  "Umbran Successor",            "Acquire all Umbran Techniques.",                                                      50},
-    {43,  "End Ruler",                   "Complete all 22 Muspelheim challenges.",                                              50},
-    {44,  "Liberator of Time",           "Open all of the Umbra Witches' final resting places.",                                50},
+    {41,  "Arsenal of Darkness",         "Unlock all 13 Bayonetta 2 weapons.",                                                  50, "arsenal_of_darkness"},
+    {42,  "Umbran Successor",            "Acquire all Umbran Techniques.",                                                      50, "umbran_successor"},
+    {43,  "End Ruler",                   "Complete all 22 Muspelheim challenges.",                                              50, "end_ruler"},
+    {44,  "Liberator of Time",           "Open all of the Umbra Witches' final resting places.",                                50, "liberator_of_time"},
     /* 45..49: Witch Trials I-V */
-    {45,  "Witch Trial I Clear",         "Complete Witch Trial I.",                                                             20},
-    {46,  "Witch Trial II Clear",        "Complete Witch Trial II.",                                                            25},
-    {47,  "Witch Trial III Clear",       "Complete Witch Trial III.",                                                           35},
-    {48,  "Witch Trial IV Clear",        "Complete Witch Trial IV.",                                                            50},
-    {49,  "Witch Trial V Clear",         "Complete Witch Trial V.",                                                             75},
+    {45,  "Witch Trial I Clear",         "Complete Witch Trial I.",                                                             10, "witch_trial_1_clear"},
+    {46,  "Witch Trial II Clear",        "Complete Witch Trial II.",                                                            25, "witch_trial_2_clear"},
+    {47,  "Witch Trial III Clear",       "Complete Witch Trial III.",                                                           25, "witch_trial_3_clear"},
+    {48,  "Witch Trial IV Clear",        "Complete Witch Trial IV.",                                                            50, "witch_trial_4_clear"},
+    {49,  "Witch Trial V Clear",         "Complete Witch Trial V.",                                                             50, "witch_trial_5_clear"},
     /* 50: Ultimate Mastery */
-    {50,  "Pure Platinum Witch",         "Earn a Pure Platinum award on all 17 story chapters on \xe2\x88\x9e Climax.",        150},
+    {50,  "Pure Platinum Witch",         "Earn a Pure Platinum award on all 17 story chapters on \xe2\x88\x9e Climax.",         50, "pure_platinum_witch"},
 };
 
 /* Snapshot of save-file chapter records, Bewitchments, and weapon unlocks used by mr_ach_eval().

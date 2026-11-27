@@ -93,10 +93,6 @@ static void presence_tick(Ctx *c) {
 }
 
 static void achieve_define_all(void) {
-    for (uint32_t i = 0; i < MR_ACH_COUNT; i++) {
-        const MrAchDef *m = &mr_ach_defs[i];
-        host.ach_event(ACH_EV_DEFINE, m->id, m->title, m->desc, m->score);
-    }
     host.ach_event(ACH_EV_READY, 0, NULL, NULL, 0);
     g_ach_defined = 1;
 }

@@ -19,7 +19,8 @@
       "optional": true,
       "formats": [{ "type": "file", "extensions": ["nsp", "xci"], "requires": ["keys"] }]
     },
-    { "id": "keys", "label": "Your Nintendo Switch prod.keys", "role": "key", "shared": "switch.prod-keys" }
+    { "id": "keys", "label": "Your Nintendo Switch prod.keys", "role": "key", "shared": "switch.prod-keys" },
+    { "id": "dlss", "label": "NVIDIA DLSS", "role": "runtime", "shared": "nvidia.dlss", "optional": true, "destination": "nvngx_dlss.dll" }
   ],
   "prepare": {
     "program": ["build/moon-river-launcher.exe", "MoonRiver-x86_64.AppImage", "build/moon-river-launcher"],
@@ -92,13 +93,49 @@
     },
     {
       "id": "frame_rate", "label": "Frame rate", "group": "Display",
-      "help": "60 is the console's. 90 and 120 are experimental.",
+      "help": "60 is the console's. Below 60 caps cleanly for weaker hardware; above 60 is experimental.",
       "choices": [
+        { "label": "30 fps", "set": { "frame_rate": "30" } },
+        { "label": "40 fps", "set": { "frame_rate": "40" } },
         { "label": "60 fps", "set": { "frame_rate": "60" } },
         { "label": "90 fps", "set": { "frame_rate": "90" } },
-        { "label": "120 fps", "set": { "frame_rate": "120" } }
+        { "label": "120 fps", "set": { "frame_rate": "120" } },
+        { "label": "144 fps", "set": { "frame_rate": "144" } },
+        { "label": "165 fps", "set": { "frame_rate": "165" } },
+        { "label": "240 fps", "set": { "frame_rate": "240" } }
       ],
       "defaults": { "frame_rate": "60" }
+    },
+    {
+      "id": "frame_time_overlay", "label": "Performance overlay", "group": "Display",
+      "help": "Frame rate and frame time at the top right of the picture.",
+      "choices": [
+        { "label": "Off", "set": { "frame_time_overlay": "off" } },
+        { "label": "On", "set": { "frame_time_overlay": "on" } }
+      ],
+      "defaults": { "frame_time_overlay": "off" }
+    },
+    {
+      "id": "language", "label": "Language", "group": "Display",
+      "help": "The game's language. Auto follows your system display language.",
+      "choices": [
+        { "label": "Auto", "set": { "language": "auto" } },
+        { "label": "English (US)", "set": { "language": "en-US" } },
+        { "label": "English (UK)", "set": { "language": "en-GB" } },
+        { "label": "French", "set": { "language": "fr" } },
+        { "label": "French (Canada)", "set": { "language": "fr-CA" } },
+        { "label": "German", "set": { "language": "de" } },
+        { "label": "Italian", "set": { "language": "it" } },
+        { "label": "Spanish", "set": { "language": "es" } },
+        { "label": "Spanish (LatAm)", "set": { "language": "es-419" } },
+        { "label": "Dutch", "set": { "language": "nl" } },
+        { "label": "Japanese", "set": { "language": "ja" } },
+        { "label": "Korean", "set": { "language": "ko" } },
+        { "label": "Chinese (Simp.)", "set": { "language": "zh-Hans" } },
+        { "label": "Chinese (Trad.)", "set": { "language": "zh-Hant" } },
+        { "label": "Russian", "set": { "language": "ru" } }
+      ],
+      "defaults": { "language": "auto" }
     },
     {
       "id": "resolution_scale", "label": "Internal resolution", "group": "Graphics",
@@ -124,6 +161,15 @@
         { "label": "Wide", "set": { "aspect": "wide" } }
       ],
       "defaults": { "aspect": "keep" }
+    },
+    {
+      "id": "hud_area", "label": "HUD area", "group": "Graphics",
+      "help": "Ultrawide only: keep the HUD centered in 16:9 or span the full wide screen.",
+      "choices": [
+        { "label": "Full screen", "set": { "hud_area": "screen" } },
+        { "label": "Centered (16:9)", "set": { "hud_area": "16:9" } }
+      ],
+      "defaults": { "hud_area": "screen" }
     },
     {
       "id": "hdr", "label": "HDR", "group": "Graphics",
@@ -163,6 +209,69 @@
         { "label": "4000 nits", "set": { "hdr_peak": "4000" } }
       ],
       "defaults": { "hdr_peak": "auto" }
+    },
+    {
+      "id": "upscaler", "label": "Upscaling", "group": "Upscaling",
+      "help": "FSR 3 works on any card. DLSS needs an NVIDIA RTX card, FSR 4 your own AMD DLLs.",
+      "choices": [
+        { "label": "Off", "set": { "upscaler": "off" } },
+        { "label": "FSR 3 Native AA", "set": { "upscaler": "fsr3" } },
+        { "label": "FSR 3 Quality", "set": { "upscaler": "fsr3_quality" } },
+        { "label": "FSR 3 Balanced", "set": { "upscaler": "fsr3_balanced" } },
+        { "label": "FSR 3 Performance", "set": { "upscaler": "fsr3_performance" } },
+        { "label": "FSR 3 Ultra Performance", "set": { "upscaler": "fsr3_ultra_performance" } },
+        { "label": "DLAA", "set": { "upscaler": "dlaa" } },
+        { "label": "DLSS Quality", "set": { "upscaler": "dlss_quality" } },
+        { "label": "DLSS Balanced", "set": { "upscaler": "dlss_balanced" } },
+        { "label": "DLSS Performance", "set": { "upscaler": "dlss_performance" } },
+        { "label": "DLSS Ultra Performance", "set": { "upscaler": "dlss_ultra_performance" } },
+        { "label": "FSR 4 Native AA", "set": { "upscaler": "fsr4" } },
+        { "label": "FSR 4 Quality", "set": { "upscaler": "fsr4_quality" } },
+        { "label": "FSR 4 Balanced", "set": { "upscaler": "fsr4_balanced" } },
+        { "label": "FSR 4 Performance", "set": { "upscaler": "fsr4_performance" } },
+        { "label": "FSR 4 Ultra Performance", "set": { "upscaler": "fsr4_ultra_performance" } }
+      ],
+      "defaults": { "upscaler": "off" }
+    },
+    {
+      "id": "sharpness", "label": "Sharpness", "group": "Upscaling",
+      "help": "Sharpens the picture after the upscaler; needs Upscaling on.",
+      "choices": [
+        { "label": "Off", "set": { "sharpness": "0" } },
+        { "label": "20 %", "set": { "sharpness": "20" } },
+        { "label": "40 %", "set": { "sharpness": "40" } },
+        { "label": "60 %", "set": { "sharpness": "60" } },
+        { "label": "80 %", "set": { "sharpness": "80" } },
+        { "label": "100 %", "set": { "sharpness": "100" } }
+      ],
+      "defaults": { "sharpness": "0" }
+    },
+    {
+      "id": "frame_generation", "label": "Frame generation", "group": "Upscaling",
+      "help": "A generated picture between frames; needs Upscaling on and your own DLLs.",
+      "choices": [
+        { "label": "Off", "set": { "frame_generation": "off" } },
+        { "label": "On", "set": { "frame_generation": "on" } }
+      ],
+      "defaults": { "frame_generation": "off" }
+    },
+    {
+      "id": "frame_generator", "label": "Frame generation: type", "group": "Upscaling",
+      "help": "FSR (AMD's DLLs) or DLSS (NVIDIA's, RTX 40 or newer).",
+      "choices": [
+        { "label": "FSR", "set": { "frame_generator": "fsr" } },
+        { "label": "DLSS", "set": { "frame_generator": "dlss" } }
+      ],
+      "defaults": { "frame_generator": "fsr" }
+    },
+    {
+      "id": "frame_generation_hud", "label": "Frame generation: HUD", "group": "Upscaling",
+      "help": "On keeps the HUD sharp on generated pictures.",
+      "choices": [
+        { "label": "On", "set": { "frame_generation_hud": "on" } },
+        { "label": "Off", "set": { "frame_generation_hud": "off" } }
+      ],
+      "defaults": { "frame_generation_hud": "on" }
     },
     {
       "id": "button_prompts", "label": "Button prompts", "group": "Controls", "in": "controllers",

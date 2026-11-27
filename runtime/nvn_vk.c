@@ -698,3 +698,6 @@ int nvn_vk_hdr_on(void) { return V.hdr != 0; }             /* [moonriver] pcmenu
 #include "nvn_vk_draw.c"                                   /* everything that draws (session 2): not a build unit of its own */
 #include "nvn_vk_pcmenu.c"                                 /* [moonriver] the PC settings menu on the screen */
 #include "nvn_vk_fsr.c"                                    /* [moonriver] issue 118: FSR 3.1 as anti-aliasing */
+#include "nvn_vk_dlss.c"                                   /* [moonriver] issue 190: DLSS / DLAA with the player's nvngx_dlss.dll */
+#include "nvn_vk_fsr4.c"                                   /* [moonriver] FSR 4 with the player's amd_fidelityfx_*_vk.dll */
+#include "nvn_vk_fg.c"                                     /* [moonriver] issue 119: frame generation with the player's DLLs */

@@ -91,7 +91,7 @@ const char* moon_phase_label(double p)
 struct SettingDef {
 	const char *key, *name, *note;
 	std::vector<std::pair<const char*, const char*>> options;   // value in the file, what the screen shows
-	int tab = 0;                                                // the section of the settings screen: 0 Display, 1 Graphics, 2 Controls
+	int tab = 0;                                                // the section of the settings screen: 0 Display, 1 Graphics, 2 Upscaling, 3 Controls
 	const char *dflt = nullptr;                                 // the reader's value when the key is not in the file; else the first option
 	const char *file = "/graphics.ini", *section = "";
 };
@@ -102,10 +102,15 @@ const std::vector<SettingDef>& setting_defs()
 		{"window", "Display mode", "Windowed, or the whole monitor the window is on.", {{"windowed", "Windowed"}, {"borderless", "Borderless"}, {"fullscreen", "Fullscreen"}}, 0},
 		{"size", "Window size", "The window in windowed mode.",     // the file's width and height (read_setting)
 			{{"1280x720", "1280 × 720"}, {"1600x900", "1600 × 900"}, {"1920x1080", "1920 × 1080"}, {"2560x1440", "2560 × 1440"}, {"3840x2160", "3840 × 2160"}}, 0},
-		{"frame_rate", "Frame rate", "60 is the console's. Higher is experimental.",
-			{{"60", "60 fps"}, {"90", "90 fps"}, {"120", "120 fps"}}, 0, "60"},
+		{"frame_rate", "Frame rate", "60 is the console's. Below 60 caps cleanly; above 60 is experimental.",
+			{{"30", "30 fps"}, {"40", "40 fps"}, {"60", "60 fps"}, {"90", "90 fps"}, {"120", "120 fps"}, {"144", "144 fps"}, {"165", "165 fps"}, {"240", "240 fps"}}, 0, "60"},
 		{"vsync", "Vertical sync", "Auto locks to a 60, 120 or 240 Hz display.",
 			{{"auto", "Auto"}, {"display", "Display"}, {"clock", "Clock"}, {"off", "Off"}, {"on", "On"}, {"mailbox", "Mailbox"}}, 0},
+		{"frame_time_overlay", "Performance overlay", "Frame rate and frame time at the top right of the picture.", {{"off", "Off"}, {"on", "On"}}, 0},
+		{"language", "Language", "The game's language; Auto follows your system display language.",
+			{{"auto", "Auto"}, {"en-US", "English (US)"}, {"en-GB", "English (UK)"}, {"fr", "French"}, {"fr-CA", "French (Canada)"},
+			 {"de", "German"}, {"it", "Italian"}, {"es", "Spanish"}, {"es-419", "Spanish (LatAm)"}, {"nl", "Dutch"},
+			 {"ja", "Japanese"}, {"ko", "Korean"}, {"zh-Hans", "Chinese (Simp.)"}, {"zh-Hant", "Chinese (Trad.)"}, {"ru", "Russian"}}, 0},
 		// the launcher's own (config/launcher.ini; the game never reads it): App::sound
 		{"sounds", "Launcher sounds", "Soft ticks as you move through these screens.", {{"on", "On"}, {"off", "Off"}}, 0, nullptr, "/launcher.ini"},
 		{"resolution_scale", "Internal resolution", "720p is the console's docked size.",
@@ -118,11 +123,20 @@ const std::vector<SettingDef>& setting_defs()
 			{{"auto", "Auto"}, {"400", "400 nits"}, {"600", "600 nits"}, {"800", "800 nits"}, {"1000", "1000 nits"}, {"1500", "1500 nits"}, {"2000", "2000 nits"}, {"4000", "4000 nits"}}, 1},
 		{"aspect", "Aspect ratio", "Keep 16:9, stretch, or native Wide (21:9 / 32:9).", {{"keep", "Fixed 16:9"}, {"stretch", "Stretch"}, {"wide", "Wide"}}, 1},
 		{"hud_area", "HUD area", "Ultrawide only: keep the HUD centered in 16:9 or span the full wide screen.", {{"16:9", "Centered (16:9)"}, {"screen", "Full screen"}}, 1, "screen"},
+		{"upscaler", "Upscaling", "DLSS and FSR 4 need your own DLLs beside moon-river-launcher.exe.",
+			{{"off", "Off"}, {"fsr3", "FSR 3 Native AA"}, {"fsr3_quality", "FSR 3 Quality"}, {"fsr3_balanced", "FSR 3 Balanced"}, {"fsr3_performance", "FSR 3 Performance"}, {"fsr3_ultra_performance", "FSR 3 Ultra Performance"},
+			 {"dlaa", "DLAA"}, {"dlss_quality", "DLSS Quality"}, {"dlss_balanced", "DLSS Balanced"}, {"dlss_performance", "DLSS Performance"}, {"dlss_ultra_performance", "DLSS Ultra Performance"},
+			 {"fsr4", "FSR 4 Native AA"}, {"fsr4_quality", "FSR 4 Quality"}, {"fsr4_balanced", "FSR 4 Balanced"}, {"fsr4_performance", "FSR 4 Performance"}, {"fsr4_ultra_performance", "FSR 4 Ultra Performance"}}, 2},
+		{"sharpness", "Sharpness", "Sharpens the picture after the upscaler; needs Upscaling on.",
+			{{"0", "Off"}, {"20", "20 %"}, {"40", "40 %"}, {"60", "60 %"}, {"80", "80 %"}, {"100", "100 %"}}, 2},
+		{"frame_generation", "Frame generation", "A generated picture between frames; needs Upscaling on and your own DLLs.", {{"off", "Off"}, {"on", "On"}}, 2},
+		{"frame_generator", "Frame generation: type", "FSR (AMD's DLLs) or DLSS (NVIDIA's, RTX 40 or newer).", {{"fsr", "FSR"}, {"dlss", "DLSS"}}, 2},
+		{"frame_generation_hud", "Frame generation: HUD", "On keeps the HUD sharp on generated pictures.", {{"on", "On"}, {"off", "Off"}}, 2},
 		{"button_prompts", "Button prompts", "Auto follows the controller or keyboard you use.",
-			{{"auto", "Auto"}, {"playstation", "PlayStation"}, {"xbox", "Xbox"}, {"switch", "Switch"}, {"keyboard", "Keyboard"}}, 2, nullptr, "/controllers.ini", "general"},
-		{"swap_confirm", "Swap confirm", "Menus only: B confirms, A goes back.", {{"off", "Off"}, {"on", "On"}}, 2, nullptr, "/controllers.ini", "general"},
+			{{"auto", "Auto"}, {"playstation", "PlayStation"}, {"xbox", "Xbox"}, {"switch", "Switch"}, {"keyboard", "Keyboard"}}, 3, nullptr, "/controllers.ini", "general"},
+		{"swap_confirm", "Swap confirm", "Menus only: B confirms, A goes back.", {{"off", "Off"}, {"on", "On"}}, 3, nullptr, "/controllers.ini", "general"},
 		{"layout", "Face buttons", "Position (Switch) or Printed letter (Xbox / PlayStation).",
-			{{"auto", "Auto"}, {"positional", "Position"}, {"labels", "Printed letter"}}, 2, nullptr, "/controllers.ini", "general"},
+			{{"auto", "Auto"}, {"positional", "Position"}, {"labels", "Printed letter"}}, 3, nullptr, "/controllers.ini", "general"},
 	};
 	return d;
 }
@@ -284,7 +298,7 @@ bool App::init(int argc, char** argv)
 	update::check(paths);
 	if (const char* t = std::getenv("MR_TAB"))             // test aid: the settings' section
 	{
-		tab = (std::atoi(t) % 3 + 3) % 3;
+		tab = (std::atoi(t) % 4 + 4) % 4;
 		model.DirtyVariable("tab");
 	}
 	if (const char* s = std::getenv("MR_SCREEN"))          // test aid: start on another screen (setup, build, mods, settings)
@@ -789,8 +803,17 @@ void App::prompts_use(SDL_Gamepad* pad)
 	if (!pad)
 		return;
 	const SDL_GamepadType t = SDL_GetGamepadType(pad);
-	prompts_use(t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5 ? 2
-		: t == SDL_GAMEPAD_TYPE_XBOX360 || t == SDL_GAMEPAD_TYPE_XBOXONE ? 3 : 1);
+	const bool ps = t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5;
+	const bool xbox = t == SDL_GAMEPAD_TYPE_XBOX360 || t == SDL_GAMEPAD_TYPE_XBOXONE
+		|| SDL_GetGamepadButtonLabel(pad, SDL_GAMEPAD_BUTTON_SOUTH) == SDL_GAMEPAD_BUTTON_LABEL_A;
+	prompts_use(ps ? 2 : xbox ? 3 : 1);
+}
+
+static bool is_nav_key(Rml::Input::KeyIdentifier k)
+{
+	using namespace Rml::Input;
+	return k == KI_RETURN || k == KI_NUMPADENTER || k == KI_ESCAPE || k == KI_UP || k == KI_DOWN
+		|| k == KI_LEFT || k == KI_RIGHT || k == KI_Q || k == KI_E;
 }
 
 void App::handle(SDL_Event& ev)
@@ -820,23 +843,39 @@ void App::handle(SDL_Event& ev)
 		auto button = SDL_GamepadButton(ev.gbutton.button);
 		SDL_GamepadButtonLabel label = pad ? SDL_GetGamepadButtonLabel(pad, button) : SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN;
 		using namespace Rml::Input;
+		KeyIdentifier k = KI_UNKNOWN;
 		// confirm and back by what the button says on it: A / cross, B / circle (A is on the right on a Nintendo pad)
 		if (label == SDL_GAMEPAD_BUTTON_LABEL_A || label == SDL_GAMEPAD_BUTTON_LABEL_CROSS)
-			key(KI_RETURN);
+			k = KI_RETURN;
 		else if (label == SDL_GAMEPAD_BUTTON_LABEL_B || label == SDL_GAMEPAD_BUTTON_LABEL_CIRCLE)
-			back();
+			k = KI_ESCAPE;
 		else if (button == SDL_GAMEPAD_BUTTON_DPAD_UP)
-			key(KI_UP);
+			k = KI_UP;
 		else if (button == SDL_GAMEPAD_BUTTON_DPAD_DOWN)
-			key(KI_DOWN);
+			k = KI_DOWN;
 		else if (button == SDL_GAMEPAD_BUTTON_DPAD_LEFT)
-			key(KI_LEFT);
+			k = KI_LEFT;
 		else if (button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
-			key(KI_RIGHT);
+			k = KI_RIGHT;
 		else if (button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)
-			key(KI_Q);
+			k = KI_Q;
 		else if (button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)
-			key(KI_E);
+			k = KI_E;
+		if (k == KI_UNKNOWN)
+			return;
+		// Steam Deck / Steam Input can mirror one press across Steam Virtual Gamepad + physical HIDAPI pad, or
+		// across HIDAPI gamepad + Desktop keyboard chords: suppress the duplicate from another source within 60 ms.
+		const Uint64 now = SDL_GetTicks();
+		if (k == last_nav_key && now - last_nav_ms < 60 && (!last_nav_from_pad || last_nav_pad != ev.gbutton.which))
+			return;
+		last_nav_key = k;
+		last_nav_ms = now;
+		last_nav_pad = ev.gbutton.which;
+		last_nav_from_pad = true;
+		if (k == KI_ESCAPE)
+			back();
+		else
+			key(k);
 		return;
 	}
 	case SDL_EVENT_GAMEPAD_AXIS_MOTION:
@@ -890,10 +929,22 @@ void App::handle(SDL_Event& ev)
 		break;
 	case SDL_EVENT_KEY_DOWN:
 	{
-		prompts_use(4);
-		if (Rml::Element* f = ctx->GetFocusElement(); f && f->GetTagName() == "input")
-			typed = true;                        // keys into the dump folder's box: the mouse leaves its focus there (hover_focus)
+		Rml::Element* f = ctx->GetFocusElement();
+		const bool in_input = f && f->GetTagName() == "input";
 		Rml::Input::KeyIdentifier k = RmlSDL::ConvertKey(int(ev.key.key));
+		const Uint64 now = SDL_GetTicks();
+		if (!in_input && is_nav_key(k))
+		{
+			if (k == last_nav_key && last_nav_from_pad && now - last_nav_ms < 60)
+				return;
+			last_nav_key = k;
+			last_nav_ms = now;
+			last_nav_pad = 0;
+			last_nav_from_pad = false;
+		}
+		prompts_use(4);
+		if (in_input)
+			typed = true;                        // keys into the dump folder's box: the mouse leaves its focus there (hover_focus)
 		if (k == Rml::Input::KI_ESCAPE)
 		{
 			back();
@@ -1167,7 +1218,8 @@ void App::refresh_title()
 	std::string built_version;
 	std::getline(std::ifstream(paths.build + "/" BUILT_VERSION), built_version);
 	// the game is built on the player's PC, so new launcher files (auto-update or unpacked by hand) leave an old game in build/ [issue 22]
-	stale = built && MR_VERSION[0] == 'v' && built_version != MR_VERSION;
+	// CI test builds ("dev-<sha>") are packaged like releases too; only a local source build ("dev build") skips the check
+	stale = built && std::strcmp(MR_VERSION, "dev build") != 0 && built_version != MR_VERSION;
 	status_bad = false;
 	std::string tag, message;
 	const update::State us = update::state(tag, message);
@@ -1486,7 +1538,7 @@ void App::refresh_settings(int bumped)
 
 void App::set_tab(int t)
 {
-	tab = (t + 3) % 3;
+	tab = (t + 4) % 4;
 	model.DirtyVariable("tab");
 	refresh_settings();
 	want_focus = true;
