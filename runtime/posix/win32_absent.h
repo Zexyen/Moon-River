@@ -57,6 +57,7 @@ typedef struct { DWORD style, dwExtendedStyle; short x, y, cx, cy; WORD id; } DL
 #define WM_LBUTTONDOWN 0x201u
 #define WM_RBUTTONDOWN 0x204u
 #define WM_MBUTTONDOWN 0x207u
+#define WM_MOUSEWHEEL 0x20Au
 #define WM_XBUTTONDOWN 0x20Bu
 #define WM_APP 0x8000u
 #define HTCLIENT 1

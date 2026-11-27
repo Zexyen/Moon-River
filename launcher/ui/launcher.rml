@@ -236,7 +236,7 @@
 			<p data-if="tab == 0">The window, the display, language and frame rate.</p>
 			<p data-if="tab == 1">What the game draws and how sharply.</p>
 			<p data-if="tab == 2">FSR 3.1, DLSS, FSR 4, sharpness and frame generation.</p>
-			<p data-if="tab == 3">Prompts and menu buttons. Gameplay buttons are rebound in the game's own panel.</p>
+			<p data-if="tab == 3">Prompts and menu buttons. Controller and keyboard &amp; mouse bindings are in the game's own panel.</p>
 			<p class="small" data-if="tab == 1 &amp;&amp; tex_note != ''">{{ tex_note }}</p>
 		</div>
 		<div class="col settings-col">

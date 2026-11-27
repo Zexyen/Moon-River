@@ -287,13 +287,19 @@ int oe_exit_request(void);                            /* nnmisc.c */
  * it is in front; a smaller window only after a click into the picture, so the title bar stays reachable for moving the
  * window (the user could not drag it: the clip pulled the cursor back). Esc (pause), losing the foreground (Alt+Tab, a click
  * elsewhere) and the end of the game let it go. The click that captures is not passed to the game (display_mouse_hold). */
-static volatile LONG g_mdx, g_mdy, g_mouse_want, g_mouse_hold;
+static volatile LONG g_mdx, g_mdy, g_mwheel, g_mouse_want, g_mouse_hold;
 static int g_mouse_clipped, g_mouse_grab;
 void display_mouse_want(int on) {
     InterlockedExchange(&g_mouse_want, on);
     if (g_hwnd) PostMessageA(g_hwnd, WM_APP + 7, 0, 0);       /* the window thread applies it */
 }
 void display_mouse_take(int *dx, int *dy) { *dx = InterlockedExchange(&g_mdx, 0); *dy = InterlockedExchange(&g_mdy, 0); }
+int display_mouse_wheel_take(void) {
+    LONG v = InterlockedExchange(&g_mwheel, 0);
+    if (!v) return 0;
+    int steps = (int)(v / 120);
+    return steps ? steps : (v > 0 ? 1 : -1);
+}
 int display_mouse_hold(void) {                              /* 1 while the buttons of the capturing click are still down */
     if (!g_mouse_hold) return 0;
     static const int b[5] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2};
@@ -398,6 +404,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
         InterlockedExchange(&g_mouse_hold, 1);
         mouse_update(h);
     }
+    if (m == WM_MOUSEWHEEL) { InterlockedAdd(&g_mwheel, (LONG)(short)HIWORD(w)); return 0; }
     if (m == WM_KEYDOWN && w == VK_ESCAPE && g_mouse_grab && !fills_monitor(h)) { g_mouse_grab = 0; mouse_update(h); }
     if (m == WM_KEYDOWN && w == 0x79 /* VK_F10 */ && uw_log_env()) uw_touch_capture();   /* developer aid: capture this frame's draws (nvn_vk_draw.c uw_cap_now) */
     if (m == WM_APP + 7 || m == WM_ACTIVATE || m == WM_SIZE || m == WM_MOVE) { mouse_update(h); if (m == WM_APP + 7) return 0; }
@@ -746,6 +753,7 @@ static void window_event(SDL_Window *w, const SDL_Event *ev) {
         if ((e.type == SDL_EVENT_KEY_DOWN || e.type == SDL_EVENT_KEY_UP) && e.key.scancode < SDL_SCANCODE_COUNT) g_keys[e.key.scancode] = e.key.down;
         if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) __atomic_fetch_or(&g_mbtn, SDL_BUTTON_MASK(e.button.button), __ATOMIC_SEQ_CST);
         if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) __atomic_fetch_and(&g_mbtn, ~SDL_BUTTON_MASK(e.button.button), __ATOMIC_SEQ_CST);
+        if (e.type == SDL_EVENT_MOUSE_WHEEL && e.wheel.y != 0.0f) InterlockedAdd(&g_mwheel, (LONG)(e.wheel.y * 120.0f));
         if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST) { memset((void *)g_keys, 0, sizeof g_keys); g_mbtn = 0; }      /* nothing stays held */
         if (e.type == SDL_EVENT_MOUSE_MOTION && !g_mouse_grab) { g_ptr_x = (LONG)e.motion.x; g_ptr_y = (LONG)e.motion.y; }      /* (a captured pointer has no place) */
         if (e.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) g_ptr_x = g_ptr_y = -1;

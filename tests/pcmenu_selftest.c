@@ -10,13 +10,21 @@ volatile LONG g_guest_frozen, g_display_close;
 static int g_vsync_applied, g_win_applied;
 void nnhid_menu_read(uint64_t *b, int *lx, int *ly, int swap_ab) { (void)swap_ab; *b = 0; *lx = *ly = 0; }
 int nnhid_menu_key(int vk) { (void)vk; return 0; }
+static int g_any_vk;
+int nnhid_menu_any_vk(void) { return g_any_vk; }
 int nvn_front_post_pcmenu(void) { return 1; }
 int nvn_vk_hdr_on(void) { return 0; }
 void display_vsync_apply(void) { g_vsync_applied++; }
 int display_window_apply(void) { g_win_applied++; return 1; }
 void display_quit(void) {}
 void display_mouse_want(int on) { (void)on; }
-int nnpad_mouse_cfg(float *s, int *i) { (void)s; (void)i; return 0; }
+int display_mouse_wheel_take(void) { return 0; }
+static int g_mcam = 1, g_minv = 0;
+static float g_msens = 1.0f;
+int nnpad_mouse_cfg(float *s, int *i) { if (s) *s = g_msens; if (i) *i = g_minv; return g_mcam; }
+int nnpad_mouse_cam_set(const char *val) { g_mcam = !strcmp(val, "on"); return 1; }
+int nnpad_mouse_sens_set(const char *val) { g_msens = (float)atof(val); return 1; }
+int nnpad_mouse_inv_set(const char *val) { g_minv = !strcmp(val, "on"); return 1; }
 static const char *g_prompts = "playstation";
 const char *nnpad_prompts_setting(void) { return g_prompts; }
 int nnpad_prompts_set(const char *val) { g_prompts = val; return 1; }
@@ -36,6 +44,39 @@ int nnpad_bind_set(const unsigned char *b) {
     if (!b) { g_bind_on = 0; return 1; }
     if (!rb_valid(b)) return 0;
     memcpy(g_bind, b, 16); g_bind_on = 1; return 1;
+}
+#define TKB2(a, b) ((a) | ((b) << 8))
+static const int g_tkb_def[25] = {
+    TKB2(VK_RBUTTON, VK_RETURN), TKB2(VK_SPACE, VK_BACK), VK_LBUTTON, 'E', 'C', TKB2(VK_MBUTTON, 'V'),
+    'R', 'F', TKB2('Q', VK_XBUTTON1), VK_LSHIFT, VK_ESCAPE, VK_TAB,
+    TKB2(VK_LEFT, '1'), TKB2(VK_UP, '2'), TKB2(VK_RIGHT, '3'), TKB2(VK_DOWN, 'T'),
+    'A', 'W', 'D', 'S', 'J', 'I', 'L', 'K', VK_LCONTROL
+};
+static int g_tkb[25] = {
+    TKB2(VK_RBUTTON, VK_RETURN), TKB2(VK_SPACE, VK_BACK), VK_LBUTTON, 'E', 'C', TKB2(VK_MBUTTON, 'V'),
+    'R', 'F', TKB2('Q', VK_XBUTTON1), VK_LSHIFT, VK_ESCAPE, VK_TAB,
+    TKB2(VK_LEFT, '1'), TKB2(VK_UP, '2'), TKB2(VK_RIGHT, '3'), TKB2(VK_DOWN, 'T'),
+    'A', 'W', 'D', 'S', 'J', 'I', 'L', 'K', VK_LCONTROL
+};
+int nnpad_kb_vk(int idx) { return idx >= 0 && idx < 25 ? g_tkb[idx] : 0; }
+int nnpad_kb_default_vk(int idx) { return idx >= 0 && idx < 25 ? g_tkb_def[idx] : 0; }
+int nnpad_kb_set(int idx, int vk) {
+    if (idx < 0 || idx >= 25) return 0;
+    int k1 = vk & 0xff, k2 = (vk >> 8) & 0xff;
+    if (!k1 && k2) { k1 = k2; k2 = 0; }
+    if (k1 && k1 == k2) k2 = 0;
+    g_tkb[idx] = k1 | (k2 << 8);
+    return 1;
+}
+int nnpad_kb_is_default(void) {
+    if (!g_mcam || g_minv || fabsf(g_msens - 1.0f) >= 0.01f) return 0;
+    for (int i = 0; i < 25; i++) if (g_tkb[i] != g_tkb_def[i]) return 0;
+    return 1;
+}
+int nnpad_kb_reset(void) {
+    memcpy(g_tkb, g_tkb_def, sizeof g_tkb);
+    g_mcam = 1; g_msens = 1.0f; g_minv = 0;
+    return 1;
 }
 int prompts_control_type(void) { return g_ctrl_type; }
 static uint32_t g_pad;
@@ -182,6 +223,51 @@ int main(int argc, char **argv) {
         /* Reset Preset back to Game's setting and return to page 0 */
         set_value(pr, 0); assert(!g_bind_on && g_cur[pr] == 0);
         page_go(0, 1); assert(g_page == 0 && g_sel == ctr);
+    }
+    /* Keyboard & Mouse secondary page: open, mouse settings, primary/secondary capture with menu-key preservation, scroll, reset */
+    {
+        int kbr = row_of("kb_controls"), rsr = row_of("kb_reset");
+        int mcam = row_of("mouse_camera"), msens = row_of("mouse_sensitivity"), minv = row_of("mouse_invert_y");
+        int kick = row_of("kb_kick"), dodge = row_of("kb_dodge"), jump = row_of("kb_jump"), move_u = row_of("kb_move_u");
+        assert(kbr >= 0 && rsr >= 0 && mcam >= 0 && msens >= 0 && minv >= 0 && kick >= 0 && dodge >= 0 && jump >= 0 && move_u >= 0);
+        assert(activate(kbr, 1) == 1 && g_page == 2 && g_sel == rsr);
+        /* Mouse camera settings */
+        change(msens, 1, 0); assert(fabsf(g_msens - 1.25f) < 0.01f && !nnpad_kb_is_default());
+        change(minv, 1, 0); assert(g_minv == 1);
+        change(mcam, -1, 0); assert(g_mcam == 0);
+        /* Capture Mouse 2 on Dodge Primary -> swaps with Kick/Confirm Primary (Mouse 2 <-> LShift) while preserving Kick/Confirm Secondary (Enter)! */
+        AcquireSRWLockExclusive(&g_lock);
+        g_sel = dodge; g_kb_col = 0; activate(dodge, 1); g_ver++;
+        ReleaseSRWLockExclusive(&g_lock);
+        assert(g_cap == dodge && g_cap_col == 0);
+        g_any_vk = 0; Sleep(40);                           /* arm */
+        g_any_vk = VK_RBUTTON; Sleep(60);                  /* press Mouse 2 */
+        g_any_vk = 0; Sleep(40);                           /* release -> clears g_cap_cool */
+        assert(g_cap == -1 && !g_cap_cool);
+        assert(g_tkb[RB_ZR] == VK_RBUTTON && g_tkb[RB_A] == TKB2(VK_LSHIFT, VK_RETURN));
+        /* Assign Mouse 5 to Jump/Back Secondary? No, verify Jump/Back still has Space + Backspace, then clear Secondary on Kick/Confirm */
+        assert(g_tkb[RB_B] == TKB2(VK_SPACE, VK_BACK));
+        AcquireSRWLockExclusive(&g_lock);
+        g_sel = dodge; g_kb_col = 0; g_ver++;
+        ReleaseSRWLockExclusive(&g_lock);
+        panel(dir, "pcmenu_kb_top_1280x720", 1280, 720);
+        /* Self-swap Kick/Confirm Primary (LShift) <-> Secondary (Enter), then clear Secondary */
+        kb_assign(RB_A, 0, VK_RETURN);
+        assert(g_tkb[RB_A] == TKB2(VK_RETURN, VK_LSHIFT));
+        kb_assign(RB_A, 1, 0);
+        assert(g_tkb[RB_A] == VK_RETURN);
+        /* Scroll down to Movement / Camera keys and render screenshot */
+        AcquireSRWLockExclusive(&g_lock);
+        g_sel = move_u; g_kb_col = 0; scroll_ensure(PCM_KB_VIS); g_ver++;
+        ReleaseSRWLockExclusive(&g_lock);
+        assert(g_scroll > 0);
+        panel(dir, "pcmenu_kb_scroll_1280x720", 1280, 720);
+        /* Reset to defaults requires two activations (confirm) */
+        assert(activate(rsr, 1) == 1 && g_kb_reset_ask == 1 && !nnpad_kb_is_default());
+        assert(activate(rsr, 1) == 1 && g_kb_reset_ask == 0 && nnpad_kb_is_default());
+        assert(g_tkb[RB_A] == TKB2(VK_RBUTTON, VK_RETURN) && g_tkb[RB_ZR] == VK_LSHIFT && g_mcam == 1 && g_minv == 0 && fabsf(g_msens - 1.0f) < 0.01f);
+        /* Return to Page 0 focuses Keyboard & mouse row */
+        page_go(0, 2); assert(g_page == 0 && g_sel == kbr);
     }
     /* closing: every player reads an idle pad until that player has let go (player 2 = a keyboard holding Esc = Plus) */
     InterlockedExchange(&g_open, 0); Sleep(200);           /* the menu's thread ends: what it does at a close */

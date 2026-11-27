@@ -12,6 +12,7 @@ int gfx_ini_get(const char *k, char *v, size_t n) { (void)k; (void)v; (void)n; r
 int gfx_option_set(const char *k, const char *v) { (void)k; (void)v; return 1; }
 void nnhid_menu_read(uint64_t *b, int *lx, int *ly, int s) { *b = 0; *lx = *ly = 0; (void)s; }
 int nnhid_menu_key(int vk) { (void)vk; return 0; }
+int nnhid_menu_any_vk(void) { return 0; }
 uint32_t nnhid_menu_pad(void) { return 0; }
 int nvn_front_post_pcmenu(void) { return 0; }
 int nvn_vk_hdr_on(void) { return 0; }
@@ -19,7 +20,11 @@ void display_vsync_apply(void) {}
 int display_window_apply(void) { return 1; }
 void display_quit(void) {}
 void display_mouse_want(int on) { (void)on; }
-int nnpad_mouse_cfg(float *s, int *i) { (void)s; (void)i; return 0; }
+int display_mouse_wheel_take(void) { return 0; }
+int nnpad_mouse_cfg(float *s, int *i) { if (s) *s = 1.0f; if (i) *i = 0; return 1; }
+int nnpad_mouse_cam_set(const char *v) { (void)v; return 1; }
+int nnpad_mouse_sens_set(const char *v) { (void)v; return 1; }
+int nnpad_mouse_inv_set(const char *v) { (void)v; return 1; }
 const char *nnpad_prompts_setting(void) { return "auto"; }
 int nnpad_prompts_set(const char *v) { (void)v; return 1; }
 const char *nnpad_menu_swap_setting(void) { return "off"; }
@@ -31,6 +36,11 @@ int nnpad_button_prompts(void) { return 1; }
 int nnpad_prompts_by_letter(void) { return 0; }
 int nnpad_bind_get(unsigned char *o) { (void)o; return 0; }
 int nnpad_bind_set(const unsigned char *b) { (void)b; return 1; }
+int nnpad_kb_vk(int idx) { (void)idx; return 0; }
+int nnpad_kb_default_vk(int idx) { (void)idx; return 0; }
+int nnpad_kb_set(int idx, int vk) { (void)idx; (void)vk; return 1; }
+int nnpad_kb_reset(void) { return 1; }
+int nnpad_kb_is_default(void) { return 1; }
 int prompts_control_type(void) { return 0; }
 static void save(const char *path) {
     FILE *f = fopen(path, "wb");
