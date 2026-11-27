@@ -321,19 +321,25 @@ pub fn dump_json(v: &Value, level: usize, out: &mut String) {
 fn step_deps(cx: &mut Ctx) -> Result<(), Fail> {
     let t = Target::host();
     let clang_exe = target::exe("clang");
-    if let Some(l) = &cx.a.llvm {
-        if !Path::new(l).join("bin").join(&clang_exe).exists() {
+    let bundled = cx.root().join("deps").join("llvm").join("bin").join(&clang_exe);
+    let clang = if let Some(l) = &cx.a.llvm {
+        let p = Path::new(l).join("bin").join(&clang_exe);
+        if !p.exists() {
             return Err(Fail(format!("--llvm {}: there is no bin/{} in it", l, clang_exe)));
         }
-        std::env::set_var("LLVM_ROOT", abspath(l));
-    } else if std::env::var_os("LLVM_ROOT").is_none() {
-        if let Some(saved) = cx.state.get("tools").and_then(|t| t.get("LLVM_ROOT")).and_then(|v| v.as_str()) {
-            if Path::new(saved).join("bin").join(&clang_exe).exists() {
-                std::env::set_var("LLVM_ROOT", saved);
+        let abs = abspath(l);
+        std::env::set_var("LLVM_ROOT", &abs);
+        PathBuf::from(&abs).join("bin").join(&clang_exe).to_string_lossy().into_owned()
+    } else {
+        if !bundled.exists() && std::env::var_os("LLVM_ROOT").is_none() {
+            if let Some(saved) = cx.state.get("tools").and_then(|t| t.get("LLVM_ROOT")).and_then(|v| v.as_str()) {
+                if Path::new(saved).join("bin").join(&clang_exe).exists() {
+                    std::env::set_var("LLVM_ROOT", saved);
+                }
             }
         }
-    }
-    let clang = compile::find_clang(cx.root());
+        compile::find_clang(cx.root())
+    };
     if !Path::new(&clang).exists() && which(&clang).is_none() {
         return Err(Fail(if t.windows() {
             "clang not found: a release has it in deps\\llvm; a checkout needs llvm-mingw (--llvm <folder>, README)".into()
@@ -345,8 +351,10 @@ fn step_deps(cx: &mut Ctx) -> Result<(), Fail> {
     }
     let mut tools = Map::new();
     tools.insert("TOOLCHAIN".into(), json!(t.name()));
-    if let Some(l) = std::env::var_os("LLVM_ROOT") {
-        tools.insert("LLVM_ROOT".into(), json!(l.to_string_lossy()));
+    if cx.a.llvm.is_some() || !bundled.exists() {
+        if let Some(l) = std::env::var_os("LLVM_ROOT") {
+            tools.insert("LLVM_ROOT".into(), json!(l.to_string_lossy()));
+        }
     }
     let ver = Command::new(&clang)
         .arg("--version")
@@ -369,6 +377,7 @@ fn step_deps(cx: &mut Ctx) -> Result<(), Fail> {
         fs::write(&src, code).map_err(|e| Fail(e.to_string()))?;
         let mut c = Command::new(&clang);
         c.args(t.clang_flags())
+            .args(t.cpu_level_for(&clang))
             .args(if t.macos() { &["-shared", "-O2"][..] } else { &["-shared", "-O2", "-nostdlib"][..] })
             .args(t.linker())
             .args(t.pic())
@@ -777,6 +786,17 @@ fn exefs_source(dump: &Path, targets: &Path) -> PathBuf {
 /// dst = a real folder with the files of src, so the build folder holds the game on its own (portable): moved when
 /// `mv`, else hard-linked (same drive: no extra space, the dump stays whole) or copied. A file already in dst with
 /// the same size is kept, so an interrupted run resumes; a symbolic link or junction at dst (older setups) is replaced.
+/// A copy that is either whole or not there. Windows gives the target its full size before the data is written, so a
+/// copy that is cut short (the build closed, the PC switched off) left a file of the right size with an empty tail,
+/// and the size check above never copied it again.
+fn copy_whole(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut part = to.as_os_str().to_owned();
+    part.push(".part");
+    let part = PathBuf::from(part);
+    fs::copy(from, &part)?;
+    fs::rename(&part, to)
+}
+
 fn place_folder(dst: &Path, src: &Path, mv: bool) -> Result<String, Fail> {
     let f = |e: std::io::Error| Fail(e.to_string());
     if fs::symlink_metadata(dst).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
@@ -796,7 +816,7 @@ fn place_folder(dst: &Path, src: &Path, mv: bool) -> Result<String, Fail> {
             let _ = fs::remove_file(&to);
             let done = if mv { fs::rename(from, &to) } else { fs::hard_link(from, &to).map(|_| linked += 1) };
             if done.is_err() {
-                fs::copy(from, &to).map_err(|e| Fail(format!("{} -> {}: {}", from.display(), to.display(), e)))?; // another drive
+                copy_whole(from, &to).map_err(|e| Fail(format!("{} -> {}: {}", from.display(), to.display(), e)))?; // another drive
             }
             placed += 1;
         }
@@ -1435,5 +1455,20 @@ mod tests {
         let g = parse(&["--game=folder".into(), "--keys=prod.keys".into()]).unwrap();
         assert_eq!(g.dump.as_deref(), Some("folder"));
         assert_eq!(g.keys.as_deref(), Some("prod.keys"));
+    }
+
+    #[test]
+    fn copy_whole_leaves_the_file_or_nothing() {
+        let t = std::env::temp_dir().join(format!("mrbuild_copy_whole_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&t);
+        fs::create_dir_all(&t).unwrap();
+        fs::write(t.join("a.bin"), b"aa").unwrap();
+        fs::write(t.join("b.bin.part"), b"cut short").unwrap(); // left by a copy that was interrupted
+        copy_whole(&t.join("a.bin"), &t.join("b.bin")).unwrap();
+        assert_eq!(fs::read(t.join("b.bin")).unwrap(), b"aa");
+        assert!(!t.join("b.bin.part").exists());
+        assert!(copy_whole(&t.join("none.bin"), &t.join("c.bin")).is_err());
+        assert!(!t.join("c.bin").exists());
+        fs::remove_dir_all(&t).unwrap();
     }
 }

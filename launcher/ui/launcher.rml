@@ -226,15 +226,17 @@
 			<img class="gl tab-gl" data-attr-src="glyph_tab_l" data-event-click="tab(tab - 1)"/>
 			<div class="t" data-class-on="tab == 0" data-event-click="tab(0)">Display</div>
 			<div class="t" data-class-on="tab == 1" data-event-click="tab(1)">Graphics</div>
-			<div class="t" data-class-on="tab == 2" data-event-click="tab(2)">Controls</div>
+			<div class="t" data-class-on="tab == 2" data-event-click="tab(2)">Upscaling</div>
+			<div class="t" data-class-on="tab == 3" data-event-click="tab(3)">Controls</div>
 			<img class="gl tab-gl" data-attr-src="glyph_tab_r" data-event-click="tab(tab + 1)"/>
 		</div>
 		<div class="lead settings-lead">
 			<h2>Settings</h2>
 			<p>The in-game PC Settings panel (F1, or Start + Select) has these too, and more.</p>
-			<p data-if="tab == 0">The window, the display and the frame rate.</p>
+			<p data-if="tab == 0">The window, the display, language and frame rate.</p>
 			<p data-if="tab == 1">What the game draws and how sharply.</p>
-			<p data-if="tab == 2">Prompts and menu buttons. Gameplay buttons are rebound in the game's own panel.</p>
+			<p data-if="tab == 2">FSR 3.1, DLSS, FSR 4, sharpness and frame generation.</p>
+			<p data-if="tab == 3">Prompts and menu buttons. Gameplay buttons are rebound in the game's own panel.</p>
 			<p class="small" data-if="tab == 1 &amp;&amp; tex_note != ''">{{ tex_note }}</p>
 		</div>
 		<div class="col settings-col">

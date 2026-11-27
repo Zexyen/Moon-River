@@ -76,7 +76,7 @@ int prompts_control_type(void);
 /* A_PROMPTS, A_MENU_SWAP, A_LAYOUT: keys of controllers.ini. A_PAGE: opens Controls page.
  * A_QUIT: ends the game. A_PRESET / A_BIND: page 1 (Controls) rows. */
 enum { A_LIVE, A_VSYNC, A_WINDOW, A_SIZE, A_SCALE, A_RESTART, A_PROMPTS, A_MENU_SWAP, A_LAYOUT, A_PAGE, A_QUIT, A_PRESET, A_BIND };
-#define ROW_VALUES 12
+#define ROW_VALUES 16
 typedef struct {
     const char *key, *label, *help, *env, *dflt;           /* dflt: the reader's value when the key is not in the file */
     int apply, optional;
@@ -89,13 +89,26 @@ static const Row k_rows[] = {
      {"windowed", "borderless", "fullscreen"}, {"Windowed", "Borderless", "Fullscreen"}, 0},
     {"size", "Window size", "The window's size in windowed mode. The game is drawn at the internal resolution and shown at this size.", "MR_WINDOW", NULL, A_SIZE, 0,
      {"1280x720", "1600x900", "1920x1080", "2560x1440", "3840x2160"}, {"1280 \xC3\x97 720", "1600 \xC3\x97 900", "1920 \xC3\x97 1080", "2560 \xC3\x97 1440", "3840 \xC3\x97 2160"}, 0},
-    {"frame_rate", "Frame rate", "60: as on the console. Above 60 (experimental): real-time clock, smart timers and smoothings. Applies at the next start.", "RECOMPS_UNCAP", "60", A_RESTART, 0,
-     {"60", "90", "120"}, {"60 fps", "90 fps", "120 fps"}, 0},
+    {"frame_rate", "Frame rate", "Target frame rate (30 to 960 in graphics.ini), keeping real time down to 15 fps. Below 60 caps cleanly for weaker hardware; above 60 is experimental. Applies at the next start.", "RECOMPS_UNCAP", "60", A_RESTART, 0,
+     {"30", "40", "60", "90", "120", "144", "165", "240"}, {"30 fps", "40 fps", "60 fps", "90 fps", "120 fps", "144 fps", "165 fps", "240 fps"}, 0},
     {"vsync", "Vertical sync", "Auto: locked to a 60 / 120 / 240 Hz display, else the program's own clock. Off: no waiting, tearing allowed. On: the swapchain's FIFO.", "MR_VK_PRESENT", "auto", A_VSYNC, 0,
      {"auto", "display", "clock", "off", "on", "mailbox"}, {"Auto", "Display", "Clock", "Off", "On", "Mailbox"}, 0},
     {"resolution_scale", "Internal resolution", "The size the game renders at (720p is the console's docked size). Applies when this panel closes.", "MR_VK_SCALE", "1.0", A_SCALE, 0,
      {"0.5", "0.75", "1.0", "1.25", "1.5", "2.0", "2.5", "3.0"},
      {"360p", "540p", "720p", "900p", "1080p", "1440p", "1800p", "4K"}, 0},
+    {"upscaler", "Upscaling", "Experimental: FSR 3.1, DLSS or FSR 4. Native AA smooths edges; Quality to Ultra Performance upscale to internal resolution (above 900p). DLAA, DLSS and FSR 4 need your own DLLs beside moon-river-launcher.exe, else FSR 3.1 runs. Applies when this panel closes.", "MR_UPSCALER", "off", A_SCALE, 0,
+     {"off", "fsr3", "fsr3_quality", "fsr3_balanced", "fsr3_performance", "fsr3_ultra_performance", "dlaa", "dlss_quality", "dlss_balanced", "dlss_performance", "dlss_ultra_performance",
+      "fsr4", "fsr4_quality", "fsr4_balanced", "fsr4_performance", "fsr4_ultra_performance"},
+     {"Off", "FSR 3 Native AA", "FSR 3 Quality", "FSR 3 Balanced", "FSR 3 Performance", "FSR 3 Ultra Performance", "DLAA", "DLSS Quality", "DLSS Balanced", "DLSS Performance", "DLSS Ultra Performance",
+      "FSR 4 Native AA", "FSR 4 Quality", "FSR 4 Balanced", "FSR 4 Performance", "FSR 4 Ultra Performance"}, 0},
+    {"sharpness", "Sharpness", "Sharpens the picture after the upscaler (FSR 3, DLSS or FSR 4 alike). Needs Upscaling on. High values can show bright outlines and more noise.", "MR_SHARPNESS", "0", A_LIVE, 0,
+     {"0", "20", "40", "60", "80", "100"}, {"Off", "20 %", "40 %", "60 %", "80 %", "100 %"}, 0},
+    {"frame_generation", "Frame generation", "Experimental, Windows. A generated picture between every two frames: twice the frame rate on screen. Needs Upscaling on, a 120 Hz display (or vsync off) and your own DLLs beside moon-river-launcher.exe.", "MR_FRAMEGEN", "off", A_LIVE, 0,
+     {"off", "on"}, {"Off", "On"}, 0},
+    {"frame_generator", "Frame generation: type", "Whose frame generation makes the pictures. FSR: AMD's amd_fidelityfx_loader_vk.dll and amd_fidelityfx_framegeneration_vk.dll. DLSS: NVIDIA's nvngx_dlss.dll and nvngx_dlssg.dll (RTX 40 or newer).", NULL, "fsr", A_LIVE, 0,
+     {"fsr", "dlss"}, {"FSR", "DLSS"}, 0},
+    {"frame_generation_hud", "Frame generation: HUD", "On: the generator also gets each frame without the HUD, so health bars and prompts stay sharp on generated pictures. Off: finished frame only. Try Off if the HUD flickers.", "MR_FG_HUD", "on", A_LIVE, 0,
+     {"on", "off"}, {"On", "Off"}, 0},
     {"hdr", "HDR", "Auto: HDR output while the desktop's HDR is on for this monitor. The scene's lights go above white, up to HDR peak; menus and the HUD stay at white.", NULL, "auto", A_LIVE, 0,
      {"auto", "off", "on"}, {"Auto", "Off", "On"}, 0},
     {"hdr_paper_white", "HDR white", "How bright the game's white is with HDR on. Auto: the desktop's brightness of SDR programs.", NULL, "auto", A_LIVE, 0,
@@ -106,6 +119,11 @@ static const Row k_rows[] = {
      {"keep", "stretch", "wide"}, {"Keep shape", "Stretch", "Wide"}, 0},
     {"hud_area", "HUD area", "Ultrawide only. Centered (16:9): keeps HUD in the middle 16:9 area. Full screen: moves corner HUD elements to the ultrawide edges.", NULL, "screen", A_LIVE, 0,
      {"16:9", "screen"}, {"Centered (16:9)", "Full screen"}, 0},
+    {"frame_time_overlay", "Performance overlay", "Shows FPS and average frame time of the last second at the top right of the picture.", NULL, "off", A_LIVE, 0,
+     {"off", "on"}, {"Off", "On"}, 0},
+    {"language", "Language", "The game's language. Auto follows your system display language. Applies at the next start.", "MR_LANGUAGE", "auto", A_RESTART, 0,
+     {"auto", "en-US", "en-GB", "fr", "fr-CA", "de", "it", "es", "es-419", "nl", "ja", "ko", "zh-Hans", "zh-Hant", "ru"},
+     {"Auto", "English (US)", "English (UK)", "French", "French (Canada)", "German", "Italian", "Spanish", "Spanish (LatAm)", "Dutch", "Japanese", "Korean", "Chinese (Simp.)", "Chinese (Trad.)", "Russian"}, 0},
     {"button_prompts", "Button prompts", "Which buttons the game shows. Auto follows what you use, pad, keyboard or mouse. The others always show that set.", NULL, "auto", A_PROMPTS, 0,
      {"auto", "playstation", "xbox", "switch", "keyboard"}, {"Auto", "PlayStation", "Xbox", "Switch", "Keyboard"}, 0},
     {"swap_confirm", "Swap Confirm", "Menus confirm with B and go back with A, and show it. Gameplay and the keyboard stay the same. This panel follows when it next opens.", NULL, "off", A_MENU_SWAP, 0,
@@ -1024,13 +1042,13 @@ static void draw_panel_words(int W, int H, float s) {
 
     /* ---- Settings rows (aligned vertical Moon River list, matching launcher .rows / .rw) ---- */
     float band_y = H - 116 * s, foot_y = H - 58 * s;
-    float top = g_page ? 76 * s : 96 * s;
-    float avail = (band_y - (g_page ? 22 : 34) * s) - top;
+    float top = (g_page || nshow > 16) ? 76 * s : 96 * s;
+    float avail = (band_y - (g_page || nshow > 16 ? 22 : 34) * s) - top;
     float rowh = nshow > 0 ? avail / nshow : 44 * s;
-    float maxh = g_page ? 34 * s : 44 * s, minh = g_page ? 24 * s : 28 * s;
+    float maxh = g_page ? 34 * s : 44 * s, minh = (g_page || nshow > 16) ? 19 * s : 28 * s;
     if (rowh > maxh) rowh = maxh;
     if (rowh < minh) rowh = minh;
-    float rpx = rowh * (g_page ? 0.55f : 0.48f), vpx = rowh * (g_page ? 0.48f : 0.41f);
+    float rpx = rowh * (g_page ? 0.55f : 0.50f), vpx = rowh * (g_page ? 0.48f : 0.43f);
     if (rpx > (g_page ? 18.0f : 21.0f) * s) rpx = (g_page ? 18.0f : 21.0f) * s;
     if (vpx > (g_page ? 15.5f : 17.5f) * s) vpx = (g_page ? 15.5f : 17.5f) * s;
     /* Top border hairline of the rows list (launcher .rows border-top: #6fe6ff38) */
@@ -1042,7 +1060,7 @@ static void draw_panel_words(int W, int H, float s) {
         if (!row_on(i)) continue;
         g_row_y[i] = y;
         g_row_x0[i] = (int)cx0; g_row_x1[i] = (int)cx1;
-        float vx1 = cx1 - 12 * s, vx0 = vx1 - (g_page ? 248 : 224) * s;
+        float vx1 = cx1 - 12 * s, vx0 = vx1 - (g_page ? 248 : 260) * s;
         int is_pill = k_rows[i].apply == A_QUIT || k_rows[i].apply == A_PAGE;
         g_val_x0[i] = (int)(is_pill ? cx0 : vx0);
         g_val_x1[i] = (int)vx1;
@@ -1323,9 +1341,32 @@ void pcmenu_prep_hide(void) {
     ReleaseSRWLockExclusive(&g_lock);
 }
 
-/* render thread (nvn_vk_pcmenu.c): the panel for this window size, drawn again when something changed */
+/* The performance overlay (frame_time_overlay = on): display.c's last second at the top right, over the running game
+ * (kind 2). Drawn again only when its text changed. */
+static char g_perf[32];
+void pcmenu_perf(int fps, double ms) {
+    char t[sizeof g_perf];
+    snprintf(t, sizeof t, "%d fps  %.1f ms", fps, ms);
+    AcquireSRWLockExclusive(&g_lock);
+    if (strcmp(t, g_perf) && (g_f_head.data || fonts_init())) { strcpy(g_perf, t); g_ver++; }
+    ReleaseSRWLockExclusive(&g_lock);
+}
+static int perf_on(void) { return g_perf[0] && gfx_options()->overlay; }
+static void draw_perf(int W, int H) {
+    float s = scale_of(W, H), px = 17 * s;
+    int pad = (int)(8 * s), w = (int)text_w(&g_f_head, g_perf, px, 0) + 2 * pad, h = (int)(26 * s);
+    alloc_panel(w, h);
+    if (!g_px) return;
+    g_rect[0] = W - w - pad; g_rect[1] = pad; g_rect[2] = w; g_rect[3] = h;
+    rect(0, 0, w, h, C_SKY0, 0.88f);
+    rect(0, 0, w, 1, C_CYAN, 0.45f);
+    rect(0, h - 1, w, 1, C_CYAN, 0.45f);
+    text(&g_f_head, (float)pad, (int)(h * 0.72f), g_perf, px, C_ICE, 0);
+}
+
+/* render thread (nvn_vk_pcmenu.c): the panel (or the performance overlay) for this window size, drawn again when something changed */
 int pcmenu_is_open(void) { return g_open != 0; }
-int pcmenu_kind(void) { return g_open ? 1 : g_prep.on ? 3 : 0; }
+int pcmenu_kind(void) { return g_open ? 1 : g_prep.on ? 3 : perf_on() ? 2 : 0; }
 int pcmenu_settled(void) { return pcmenu_kind() != 1 || (!g_close_at && GetTickCount64() - g_open_at >= 1000); }
 int pcmenu_visible(void) { return pcmenu_kind() != 0; }
 int pcmenu_panel_size(int W, int H, int r[4], unsigned *gen) {
@@ -1338,7 +1379,7 @@ int pcmenu_panel_size(int W, int H, int r[4], unsigned *gen) {
     ULONGLONG now = GetTickCount64();
     int turn = !g_gpu && (kind == 1 || kind == 3) && now - drawn_at >= (took > 33 ? took : 33);
     if (g_drawn_ver != g_ver || g_for_w != W || g_for_h != H || drawn_kind != kind || turn) {
-        if (kind == 1) draw_panel(W, H); else draw_prep(W, H);
+        if (kind == 1) draw_panel(W, H); else if (kind == 2) draw_perf(W, H); else draw_prep(W, H);
         g_drawn_ver = g_ver; g_for_w = W; g_for_h = H; drawn_kind = kind; g_gen++; drawn_at = now;
         took = GetTickCount64() - now;
     }

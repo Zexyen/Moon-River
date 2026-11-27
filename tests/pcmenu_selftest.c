@@ -134,6 +134,24 @@ int main(int argc, char **argv) {
     assert(hdr_row >= 0 && !strcmp(k_rows[hdr_row].val[g_cur[hdr_row]], "screen") && gfx_options()->hud_centre == 0 && !row_restart(hdr_row));
     change(hdr_row, -1, 0); assert(!strcmp(k_rows[hdr_row].val[g_cur[hdr_row]], "16:9") && gfx_options()->hud_centre == 1 && !row_restart(hdr_row));
     change(hdr_row, 1, 0); assert(!strcmp(k_rows[hdr_row].val[g_cur[hdr_row]], "screen") && gfx_options()->hud_centre == 0 && !row_restart(hdr_row));
+    /* upscaler, sharpness, frame_generation, frame_time_overlay, language, frame_rate */
+    int ur = row_of("upscaler"), sr = row_of("sharpness"), fgr = row_of("frame_generation"), fgt = row_of("frame_generator"), fgh = row_of("frame_generation_hud");
+    int po = row_of("frame_time_overlay"), lr = row_of("language"), fr = row_of("frame_rate");
+    assert(ur >= 0 && row_count(ur) == 16 && sr >= 0 && fgr >= 0 && fgt >= 0 && fgh >= 0 && po >= 0 && lr >= 0 && row_count(lr) == 15 && fr >= 0 && row_count(fr) == 8);
+    change(ur, 1, 0); assert(gfx_options()->upscaler == 1 && row_restart(ur));
+    set_value(ur, 6); assert(gfx_options()->upscaler == 6);
+    set_value(ur, 11); assert(gfx_options()->upscaler == 11);
+    set_value(ur, 0); assert(gfx_options()->upscaler == 0);
+    change(sr, 1, 0); assert(fabsf(gfx_options()->sharpness - 0.2f) < 1e-5f && !row_restart(sr));
+    set_value(sr, 0); assert(gfx_options()->sharpness == 0.0f);
+    change(fgr, 1, 0); assert(gfx_options()->frame_gen == 1 && !row_restart(fgr));
+    change(fgt, 1, 0); assert(gfx_options()->frame_gen == 2 && !row_restart(fgt));
+    change(fgh, 1, 0); assert(gfx_options()->frame_gen_no_hud == 1 && !row_restart(fgh));
+    set_value(fgr, 0); set_value(fgt, 0); set_value(fgh, 0);
+    change(po, 1, 0); assert(gfx_options()->overlay == 1 && !row_restart(po));
+    set_value(po, 0); assert(gfx_options()->overlay == 0);
+    change(lr, 1, 0); assert(!strcmp(k_rows[lr].val[g_cur[lr]], "en-US") && row_restart(lr));
+    set_value(lr, 0); assert(!strcmp(k_rows[lr].val[g_cur[lr]], "auto") && !row_restart(lr));
     g_sel = rs; g_ver++;
     panel(dir, "pcmenu_1280x720", 1280, 720);
     panel(dir, "pcmenu_3840x2160", 3840, 2160);

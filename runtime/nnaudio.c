@@ -23,6 +23,7 @@
  *                                       then does its own mix-down, as on a console set to stereo output)
  *              MR_AUDIO_LOG=1         print the statistics every second instead of every 10 s
  *              MR_AUDIO_MUTE=1        no host device (clock-driven)
+ *              MR_AUDIO_SDL=1         Windows: use SDL audio from the start instead of waveOut
  *              MR_AUDIO_LEAD=<n>      the most buffers the host lead may grow to (default 16, 0 = never; see g_lead)
  *              MR_AUDIO_TONE=1        add a quiet 440 Hz test tone to the first second (checks the host path)
  *              MR_OPUS_DLL=<file>     libopus DLL for the Opus decoder (default libopus-0.dll, then MSYS2's)
@@ -80,11 +81,44 @@ typedef struct {
     int prepared;
 } Slot;
 
+#ifdef _WIN32
+/* [issue 182] plat_audio_sdl.c: the same waveOut calls on SDL audio, taken when waveOutOpen fails (d->sdl) */
+MMRESULT sdl_waveOutOpen(HWAVEOUT *out, UINT dev, const WAVEFORMATEX *f, DWORD_PTR cb, DWORD_PTR inst, DWORD flags);
+MMRESULT sdl_waveOutClose(HWAVEOUT h);
+MMRESULT sdl_waveOutPrepareHeader(HWAVEOUT h, WAVEHDR *hdr, UINT n);
+MMRESULT sdl_waveOutUnprepareHeader(HWAVEOUT h, WAVEHDR *hdr, UINT n);
+MMRESULT sdl_waveOutWrite(HWAVEOUT h, WAVEHDR *hdr, UINT n);
+MMRESULT sdl_waveOutReset(HWAVEOUT h);
+MMRESULT sdl_waveOutPause(HWAVEOUT h);
+MMRESULT sdl_waveOutRestart(HWAVEOUT h);
+MMRESULT sdl_waveOutSetVolume(HWAVEOUT h, DWORD v);
+MMRESULT sdl_waveOutGetPosition(HWAVEOUT h, MMTIME *t, UINT n);
+#define ao_waveOutClose(s, h) ((s) ? sdl_waveOutClose(h) : waveOutClose(h))
+#define ao_waveOutPrepareHeader(s, h, a, n) ((s) ? sdl_waveOutPrepareHeader(h, a, n) : waveOutPrepareHeader(h, a, n))
+#define ao_waveOutUnprepareHeader(s, h, a, n) ((s) ? sdl_waveOutUnprepareHeader(h, a, n) : waveOutUnprepareHeader(h, a, n))
+#define ao_waveOutWrite(s, h, a, n) ((s) ? sdl_waveOutWrite(h, a, n) : waveOutWrite(h, a, n))
+#define ao_waveOutReset(s, h) ((s) ? sdl_waveOutReset(h) : waveOutReset(h))
+#define ao_waveOutPause(s, h) ((s) ? sdl_waveOutPause(h) : waveOutPause(h))
+#define ao_waveOutRestart(s, h) ((s) ? sdl_waveOutRestart(h) : waveOutRestart(h))
+#define ao_waveOutSetVolume(s, h, v) ((s) ? sdl_waveOutSetVolume(h, v) : waveOutSetVolume(h, v))
+#define ao_waveOutGetPosition(s, h, t, n) ((s) ? sdl_waveOutGetPosition(h, t, n) : waveOutGetPosition(h, t, n))
+#else
+#define ao_waveOutClose(s, h) ((void)(s), waveOutClose(h))
+#define ao_waveOutPrepareHeader(s, h, a, n) ((void)(s), waveOutPrepareHeader(h, a, n))
+#define ao_waveOutUnprepareHeader(s, h, a, n) ((void)(s), waveOutUnprepareHeader(h, a, n))
+#define ao_waveOutWrite(s, h, a, n) ((void)(s), waveOutWrite(h, a, n))
+#define ao_waveOutReset(s, h) ((void)(s), waveOutReset(h))
+#define ao_waveOutPause(s, h) ((void)(s), waveOutPause(h))
+#define ao_waveOutRestart(s, h) ((void)(s), waveOutRestart(h))
+#define ao_waveOutSetVolume(s, h, v) ((void)(s), waveOutSetVolume(h, v))
+#define ao_waveOutGetPosition(s, h, t, n) ((void)(s), waveOutGetPosition(h, t, n))
+#endif
+
 typedef struct {
     uint64_t handle;                                  /* the guest's AudioOut object (0 = unused entry) */
     uint64_t event;
     uint8_t own_event[0x40];                          /* [moonriver] private event for SDK 13's no-event OpenDefaultAudioOut */
-    int rate, channels, open, started;
+    int rate, channels, open, started, sdl;
     HWAVEOUT wave;
     Slot slots[SLOTS];
     unsigned head, tail;                              /* playing queue: slots head..tail-1 (mod SLOTS) */
@@ -224,7 +258,7 @@ static int collect_finished(AoDev *d, int everything) {
             if (s->prepared) { if (!(s->hdr.dwFlags & WHDR_DONE)) break; }
             else if (!d->started || now < s->due) break;
         }
-        if (s->prepared) { waveOutUnprepareHeader(d->wave, &s->hdr, sizeof s->hdr); s->prepared = 0; }
+        if (s->prepared) { ao_waveOutUnprepareHeader(d->sdl, d->wave, &s->hdr, sizeof s->hdr); s->prepared = 0; }
         d->head++;
         done++;
     }
@@ -233,7 +267,7 @@ static int collect_finished(AoDev *d, int everything) {
         MMTIME mt;
         memset(&mt, 0, sizeof mt);
         mt.wType = TIME_SAMPLES;
-        if (waveOutGetPosition(d->wave, &mt, sizeof mt) == MMSYSERR_NOERROR && mt.wType == TIME_SAMPLES)
+        if (ao_waveOutGetPosition(d->sdl, d->wave, &mt, sizeof mt) == MMSYSERR_NOERROR && mt.wType == TIME_SAMPLES)
             ahead = (int)((DWORD)d->frames_submitted - mt.u.sample);
     }
     while (d->relc != d->tail) {
@@ -322,7 +356,8 @@ static void open_default_audio_out(Ctx *c, uint64_t handle, uint64_t event, uint
         return;
     }
     HWAVEOUT old = d->open ? d->wave : NULL;
-    if (old) { waveOutReset(old); collect_finished(d, 1); }
+    int old_sdl = d->open ? d->sdl : 0;
+    if (old) { ao_waveOutReset(old_sdl, old); collect_finished(d, 1); }
     for (unsigned i = 0; i < SLOTS; i++) d->slots[i].prepared = 0;
     int same = d->handle == handle;
     if (!same && d == g_wav_dev) g_wav_dev = NULL;    /* another object took this slot: stop writing its audio to the first's WAV */
@@ -370,10 +405,28 @@ static void open_default_audio_out(Ctx *c, uint64_t handle, uint64_t event, uint
             }
         }
 #endif
-        MMRESULT r = waveOutOpen(&d->wave, WAVE_MAPPER, &f, (DWORD_PTR)g_wake, 0, CALLBACK_EVENT);
+        MMRESULT r;
+#ifdef _WIN32
+        /* [issue 182] Windows waveOutOpen(WAVE_MAPPER) can fail with error 2 (preferred device -1) while the
+         * launcher's SDL audio plays fine: fall back to SDL audio, or take it from the start with MR_AUDIO_SDL=1. */
+        d->sdl = 0;
+        if (getenv("MR_AUDIO_SDL")) {
+            r = sdl_waveOutOpen(&d->wave, WAVE_MAPPER, &f, (DWORD_PTR)g_wake, 0, CALLBACK_EVENT);
+            d->sdl = r == MMSYSERR_NOERROR;
+        } else {
+            r = waveOutOpen(&d->wave, WAVE_MAPPER, &f, (DWORD_PTR)g_wake, 0, CALLBACK_EVENT);
+            if (r != MMSYSERR_NOERROR) {
+                printf("nn::audio: waveOutOpen failed (%u): trying SDL audio\n", (unsigned)r);
+                r = sdl_waveOutOpen(&d->wave, WAVE_MAPPER, &f, (DWORD_PTR)g_wake, 0, CALLBACK_EVENT);
+                d->sdl = r == MMSYSERR_NOERROR;
+            }
+        }
+#else
+        r = waveOutOpen(&d->wave, WAVE_MAPPER, &f, (DWORD_PTR)g_wake, 0, CALLBACK_EVENT);
+#endif
         if (r != MMSYSERR_NOERROR) { d->wave = NULL; printf("nn::audio: waveOutOpen failed (%u): no sound, buffers are released by the clock\n", (unsigned)r); }
         else {
-            waveOutPause(d->wave);                    /* nothing plays before StartAudioOut */
+            ao_waveOutPause(d->sdl, d->wave);         /* nothing plays before StartAudioOut */
             /* Test copies are silent: only the copy a person plays (moon-river-game) is audible,
              * like the window rule in display.c. The device stays open, so timing is the same as with sound.
              * MR_VOLUME=<0..100> overrides either way. */
@@ -389,7 +442,7 @@ static void open_default_audio_out(Ctx *c, uint64_t handle, uint64_t event, uint
             if (percent < 0) percent = 0;
             if (percent > 100) percent = 100;
             DWORD level = (DWORD)(0xffff * percent / 100);
-            waveOutSetVolume(d->wave, level | level << 16);
+            ao_waveOutSetVolume(d->sdl, d->wave, level | level << 16);
             printf("nn::audio: host volume %d%%%s\n", percent, percent ? "" : " (test copy: silent; MR_VOLUME=<0..100> to change)");
         }
     }
@@ -403,13 +456,13 @@ static void open_default_audio_out(Ctx *c, uint64_t handle, uint64_t event, uint
     }
     d->tone_left = getenv("MR_AUDIO_TONE") ? d->rate / 512 : 0;
     d->open = 1;
-    int index = (int)(d - g_ao), rate = d->rate, channels = d->channels, has_wave = d->wave != NULL;
+    int index = (int)(d - g_ao), rate = d->rate, channels = d->channels, has_wave = d->wave != NULL, used_sdl = d->sdl;
     LeaveCriticalSection(&g_lock);
-    if (old) waveOutClose(old);
+    if (old) ao_waveOutClose(old_sdl, old);
     const char *n = guest_thread_name_of(GetCurrentThreadId());
     printf("nn::audio: OpenDefaultAudioOut [%d] (from guest %llx, thread \"%s\"): game asks %u Hz, %u channels -> %d Hz, %d channels, 16-bit, %s\n",
            index, (unsigned long long)c->import_from, n ? n : "?", want_rate, want_channels, rate, channels,
-           has_wave ? "waveOut device open" : "no host device");
+           has_wave ? (used_sdl ? "SDL audio open" : "waveOut device open") : "no host device");
     RET(0);
 }
 
@@ -487,16 +540,16 @@ static void audio_AppendAudioOutBuffer(Ctx *c) {      /* (AudioOut *, AudioOutBu
                 MMTIME mt;
                 memset(&mt, 0, sizeof mt);
                 mt.wType = TIME_SAMPLES;
-                if (waveOutGetPosition(d->wave, &mt, sizeof mt) == MMSYSERR_NOERROR && mt.wType == TIME_SAMPLES && (unsigned long long)mt.u.sample >= d->frames_submitted) d->starved++;
+                if (ao_waveOutGetPosition(d->sdl, d->wave, &mt, sizeof mt) == MMSYSERR_NOERROR && mt.wType == TIME_SAMPLES && (unsigned long long)mt.u.sample >= d->frames_submitted) d->starved++;
             }
             d->frames_submitted += frames;
             memset(&s->hdr, 0, sizeof s->hdr);
             s->hdr.lpData = (LPSTR)s->pcm;
             s->hdr.dwBufferLength = frames * 4;
-            MMRESULT wr = waveOutPrepareHeader(d->wave, &s->hdr, sizeof s->hdr);
+            MMRESULT wr = ao_waveOutPrepareHeader(d->sdl, d->wave, &s->hdr, sizeof s->hdr);
             if (wr == MMSYSERR_NOERROR) {
-                if ((wr = waveOutWrite(d->wave, &s->hdr, sizeof s->hdr)) == MMSYSERR_NOERROR) s->prepared = 1;
-                else waveOutUnprepareHeader(d->wave, &s->hdr, sizeof s->hdr);
+                if ((wr = ao_waveOutWrite(d->sdl, d->wave, &s->hdr, sizeof s->hdr)) == MMSYSERR_NOERROR) s->prepared = 1;
+                else ao_waveOutUnprepareHeader(d->sdl, d->wave, &s->hdr, sizeof s->hdr);
             }
             if (wr != MMSYSERR_NOERROR && !d->write_failed) {   /* [issue 182] once per AudioOut: an open device that takes no buffers is silent too */
                 d->write_failed = 1;
@@ -565,7 +618,7 @@ static void audio_StartAudioOut(Ctx *c) {             /* (AudioOut *) -> Result 
             d->clock_due += (LONGLONG)s->frames * g_freq.QuadPart / d->rate;
             s->due = d->clock_due;
         }
-        if (d->wave) waveOutRestart(d->wave);
+        if (d->wave) ao_waveOutRestart(d->sdl, d->wave);
     }
     if (d) { queued = d->tail - d->head; index = (int)(d - g_ao); }
     LeaveCriticalSection(&g_lock);
@@ -592,9 +645,10 @@ static void audio_StopAudioOut(Ctx *c) {              /* (AudioOut *): everythin
     EnterCriticalSection(&g_lock);
     AoDev *d = ao_find(A0);
     HWAVEOUT w = d ? d->wave : NULL;
+    int wsdl = d ? d->sdl : 0;
     LeaveCriticalSection(&g_lock);
     if (!d) { printf("nn::audio: StopAudioOut on an AudioOut that was never opened\n"); return; }
-    if (w) waveOutReset(w);                           /* marks every queued header as done */
+    if (w) ao_waveOutReset(wsdl, w);                  /* marks every queued header as done */
     EnterCriticalSection(&g_lock);
     d = ao_find(A0);
     uint64_t ev = 0;
@@ -603,7 +657,7 @@ static void audio_StopAudioOut(Ctx *c) {              /* (AudioOut *): everythin
         d->frames_submitted = 0;                      /* waveOutReset also sets the device position back to 0 */
         if (d->open) collect_finished(d, 1);
         d->started = 0;
-        if (d->wave) waveOutPause(d->wave);
+        if (d->wave) ao_waveOutPause(d->sdl, d->wave);
         ev = d->event;
         index = (int)(d - g_ao);
     }
@@ -616,16 +670,17 @@ static void audio_CloseAudioOut(Ctx *c) {             /* (AudioOut *) */
     EnterCriticalSection(&g_lock);
     AoDev *d = ao_find(A0);
     HWAVEOUT w = d ? d->wave : NULL;
+    int wsdl = d ? d->sdl : 0;
     LeaveCriticalSection(&g_lock);
     if (!d) { printf("nn::audio: CloseAudioOut on an AudioOut that was never opened\n"); return; }
-    if (w) waveOutReset(w);
+    if (w) ao_waveOutReset(wsdl, w);
     EnterCriticalSection(&g_lock);
     d = ao_find(A0);
     unsigned long long app = 0, rel = 0;
     int index = -1;
     if (d) {
         if (d->open) collect_finished(d, 1);
-        d->open = d->started = 0;
+        d->open = d->started = d->sdl = 0;
         d->wave = NULL;
         d->event = 0;
         if (g_wav && d == g_wav_dev) wav_header();
@@ -634,7 +689,7 @@ static void audio_CloseAudioOut(Ctx *c) {             /* (AudioOut *) */
         index = (int)(d - g_ao);
     }
     LeaveCriticalSection(&g_lock);
-    if (w) waveOutClose(w);
+    if (w) ao_waveOutClose(wsdl, w);
     printf("nn::audio: CloseAudioOut [%d] (%llu buffers appended, %llu released)\n", index, app, rel);
 }
 

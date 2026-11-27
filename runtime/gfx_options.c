@@ -76,6 +76,11 @@ static const char *const k_default_ini =
 ";   leave it at docked.\r\n"
 "console_mode = docked\r\n"
 "\r\n"
+"; language = auto | en-US | en-GB | fr | fr-CA | de | it | es | es-419 | nl | ja | ko | zh-Hans | zh-Hant | ru\r\n"
+";   auto: follows the operating system's display language (mapped to the closest supported language; else en-US).\r\n"
+";   Any other value forces that language at the next start. MR_LANGUAGE in the environment wins over this key.\r\n"
+"language = auto\r\n"
+"\r\n"
 "; resolution_scale = 1.0\r\n"
 ";   Internal resolution scale, 0.25 to 3.0 (Vulkan only; OpenGL ignores it). 1.0 = the game's own 1280x720.\r\n"
 ";   1.5 = 1920x1080, 2.0 = 2560x1440, 3.0 = 3840x2160 (4K): drawn larger, shown at the window's size.\r\n"
@@ -118,19 +123,16 @@ static const char *const k_default_ini =
 "hud_area = screen\r\n"
 "\r\n"
 "; frame_time_overlay = off | on\r\n"
-";   on: the average frame time of the last second in the window title ('.. fps - 16.67 ms per frame') and as a\r\n"
-";   'frame-time:' line in the log. (Bars drawn into the picture are not implemented yet.)\r\n"
+";   on: shows FPS and average frame time in the top-left corner, in the window title, and as a 'frame-time:' line in the log.\r\n"
 "frame_time_overlay = off\r\n"
 "\r\n"
-"; frame_rate = 60      (60 .. 120; EXPERIMENTAL above 60)\r\n"
-";   60: the game as made. 61 .. 120: the game's frame clock measures real time and the runtime paces the game at this\r\n"
-";   value; frame counters, float timer reloads, smoothings, cinematic shot holds, and slow motion follow game time.\r\n"
+"; frame_rate = 60      (30 .. 960; EXPERIMENTAL outside 60)\r\n"
+";   60: the game as made. Below 60 (e.g. 30, 40, or any value down to 30): paced at that rate while keeping real time.\r\n"
+";   Gameplay also keeps real time down to 15 fps when the PC cannot hold the target rate.\r\n"
+";   Above 60 (e.g. 90, 120, 144, 165, 240, or any value up to 960): the game's frame clock measures real time and the\r\n"
+";   runtime paces the game at this value; frame counters, float timer reloads, smoothings, cinematic shot holds, and\r\n"
+";   slow motion follow game time.\r\n"
 "frame_rate = 60\r\n"
-"\r\n"
-"; cutscene_fps = 30 | 60\r\n"
-";   30: the game's own 30 fps mode on the title, in menus and in cutscenes, as on the console.\r\n"
-";   60: those run in its 60 fps mode, as gameplay does (timing stays real time). Movies keep their own rate.\r\n"
-"cutscene_fps = 30\r\n"
 "\r\n"
 "; model_lod = game | highest\r\n"
 ";   game: models lose detail with distance and far ones disappear, as on the console. highest: every model with detail\r\n"
@@ -148,8 +150,46 @@ static const char *const k_default_ini =
 ";   GPU time a frame, more at higher internal resolutions.\r\n"
 ";   fsr3_quality .. fsr3_ultra_performance: the scene is drawn smaller (1/1.5, 1/1.7, 1/2, 1/3 of the internal resolution\r\n"
 ";   across, never below 900p) and FSR 3.1 upscales it to the internal resolution: faster, a little softer. Above 900p only.\r\n"
+"; upscaler = ... | dlaa | dlss_quality | dlss_balanced | dlss_performance | dlss_ultra_performance      (experimental)\r\n"
+";   NVIDIA DLSS in FSR's place at the same scales (dlaa: at the internal resolution). NVIDIA RTX on Windows only, and it\r\n"
+";   needs your own copy of nvngx_dlss.dll beside moon-river-launcher.exe (take it from a game that has DLSS; it is not shipped\r\n"
+";   here). Without it, or on another GPU, the FSR 3.1 mode of the same name runs instead.\r\n"
+"; upscaler = ... | fsr4 | fsr4_quality | fsr4_balanced | fsr4_performance | fsr4_ultra_performance      (experimental)\r\n"
+";   AMD FSR 4 in FSR 3.1's place at the same scales (fsr4: at the internal resolution). AMD Radeon RX 6000 or newer on\r\n"
+";   Windows with Adrenalin 26.10.1 or newer, and it needs your own copies of amd_fidelityfx_loader_vk.dll and\r\n"
+";   amd_fidelityfx_upscaler_vk.dll beside moon-river-launcher.exe (from AMD's FSR SDK 2.4.0 or newer, or a Vulkan game that has\r\n"
+";   FSR 4; they are not shipped here; the driver's amdxcffx64.dll is for DirectX 12 and does not work). Without them,\r\n"
+";   or on another GPU, the FSR 3.1 mode of the same name runs instead.\r\n"
 ";   Applies when the PC settings panel closes.\r\n"
 "upscaler = off\r\n"
+"\r\n"
+"; sharpness = 0 .. 100      (with an upscaler mode above)\r\n"
+";   0: the picture as the upscaler gives it. Above 0 it is sharpened after the upscaler, FSR 3.1, DLSS or FSR 4 alike\r\n"
+";   (AMD's RCAS filter): 100 is the strongest. High values can show bright outlines and more noise. Applies while the\r\n"
+";   game runs.\r\n"
+"sharpness = 0\r\n"
+"\r\n"
+"; frame_generation = off | on      (Vulkan, Windows; experimental)\r\n"
+";   A generated picture is shown between every two frames of the game, so the screen gets twice the game's frame rate.\r\n"
+";   It needs an upscaler mode above (any but off: that is where the motion vectors come from), your own DLLs beside\r\n"
+";   moon-river-launcher.exe, and a display that shows twice the game's frame rate (120 Hz for 60 fps) or vsync = off.\r\n"
+";   Menus, movies and anything without a 3D scene are shown as they are. It adds about half a frame of delay, and the\r\n"
+";   HUD can smear on generated pictures. Where it cannot run the game is shown as before and the log says why.\r\n"
+";   Applies while the game runs.\r\n"
+"frame_generation = off\r\n"
+"\r\n"
+"; frame_generator = fsr | dlss      (with frame_generation = on)\r\n"
+";   Whose frame generation makes the pictures, with your own DLLs beside moon-river-launcher.exe:\r\n"
+";   fsr: AMD's amd_fidelityfx_loader_vk.dll and amd_fidelityfx_framegeneration_vk.dll (FSR SDK 2.4.0 or newer).\r\n"
+";   dlss: NVIDIA's nvngx_dlss.dll and nvngx_dlssg.dll from a game that has DLSS frame generation (RTX 40 or newer).\r\n"
+";   Applies while the game runs.\r\n"
+"frame_generator = fsr\r\n"
+"\r\n"
+"; frame_generation_hud = on | off      (with frame_generation)\r\n"
+";   on: the generator also gets each frame as it was before the game drew its HUD over it, so health bars, the combo\r\n"
+";   counter and button prompts stay sharp and still on generated pictures. off: it gets the finished frame only (the HUD\r\n"
+";   can smear when the camera moves). Try off if the HUD flickers or parts of it are missing. Applies while the game runs.\r\n"
+"frame_generation_hud = on\r\n"
 "\r\n"
 "; bc7_textures = off | on      (Vulkan, GPUs without ASTC)\r\n"
 ";   on: the game's ASTC textures come ready-made from build/cache/bc7 instead of being decoded on the CPU as they appear:\r\n"
@@ -220,10 +260,13 @@ static void opt_path(char *out) {
     if (!_fullpath(out, tmp, MAX_PATH)) snprintf(out, MAX_PATH, "%s", tmp);
 }
 static int upscaler_of(const char *v) {      /* [moonriver] issue 118: GfxOptions.upscaler; an unknown value is off */
-    static const char *const k[] = {"off", "fsr3", "fsr3_quality", "fsr3_balanced", "fsr3_performance", "fsr3_ultra_performance"};
-    for (int i = 1; i < 6; i++) if (!_stricmp(v, k[i])) return i;
+    static const char *const k[] = {"off", "fsr3", "fsr3_quality", "fsr3_balanced", "fsr3_performance", "fsr3_ultra_performance",
+                                    "dlaa", "dlss_quality", "dlss_balanced", "dlss_performance", "dlss_ultra_performance",      /* 6 .. 10 (nvn_vk_dlss.c) */
+                                    "fsr4", "fsr4_quality", "fsr4_balanced", "fsr4_performance", "fsr4_ultra_performance"};      /* 11 .. 15 (nvn_vk_fsr4.c) */
+    for (int i = 1; i < 16; i++) if (!_stricmp(v, k[i])) return i;
     return 0;
 }
+static int framegen_of(const char *v) { return !_stricmp(v, "fsr") ? 1 : !_stricmp(v, "dlss") ? 2 : !_stricmp(v, "test") ? 3 : 0; }      /* [moonriver] GfxOptions.frame_gen (test: MR_FRAMEGEN only) */
 /* [moonriver] -1 not asked yet; 1: started in RecompLauncher's Big Picture mode, until a Display mode is picked in the panel */
 static int g_bigpicture = -1;
 static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
@@ -258,8 +301,9 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
         else if (!_stricmp(key, "vsync")) o->present = !_stricmp(val, "on") ? 1 : !_stricmp(val, "off") ? 2 : !_stricmp(val, "mailbox") ? 3 : !_stricmp(val, "display") ? 4 : !_stricmp(val, "auto") ? 5 : 0;
         else if (!_stricmp(key, "gpu")) { if (_stricmp(val, "auto")) snprintf(o->gpu, sizeof o->gpu, "%s", val); }
         else if (!_stricmp(key, "console_mode")) o->handheld = !_stricmp(val, "handheld");
+        else if (!_stricmp(key, "language")) { if (_stricmp(val, "auto")) snprintf(o->language, sizeof o->language, "%s", val); else o->language[0] = 0; }
         else if (!_stricmp(key, "resolution_scale")) { float v = (float)atof(val); if (v > 0) o->scale = v; }
-        else if (!_stricmp(key, "anisotropic_filtering") || !_stricmp(key, "texture_lod_bias")) { }      /* [moonriver] keys of older files: not used any more */
+        else if (!_stricmp(key, "anisotropic_filtering") || !_stricmp(key, "texture_lod_bias") || !_stricmp(key, "cutscene_fps")) { }      /* [moonriver] keys of older files: not used any more */
         else if (!_stricmp(key, "frame_time_overlay")) o->overlay = !_stricmp(val, "on") || !strcmp(val, "1");
         else if (!_stricmp(key, "profile")) o->profile = !_stricmp(val, "low");
         else if (!_stricmp(key, "shader_wait")) o->shader_skip = !_stricmp(val, "skip");
@@ -267,15 +311,18 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
         else if (!_stricmp(key, "model_lod")) o->model_lod_high = !_stricmp(val, "highest");      /* [moonriver] issue 86 */
         else if (!_stricmp(key, "film_grain")) o->no_film_grain = !_stricmp(val, "off");      /* [moonriver] issue 86 */
         else if (!_stricmp(key, "upscaler")) o->upscaler = upscaler_of(val);      /* [moonriver] issue 118 */
+        else if (!_stricmp(key, "sharpness")) { float v = (float)atof(val) / 100.0f; o->sharpness = v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; }
+        else if (!_stricmp(key, "frame_generation_hud")) o->frame_gen_no_hud = !_stricmp(val, "off");
+        else if (!_stricmp(key, "frame_generation")) { int k = framegen_of(val); o->frame_gen_on = !_stricmp(val, "on") || k == 1 || k == 2; if (k == 1 || k == 2) o->frame_gen_kind = k; }
+        else if (!_stricmp(key, "frame_generator")) { int k = framegen_of(val); if (k == 1 || k == 2) o->frame_gen_kind = k; }
         else if (!_stricmp(key, "aspect")) { o->aspect_stretch = !_stricmp(val, "stretch"); o->wide_width = !_stricmp(val, "wide") ? -1 : 0; }      /* [Recomps#1] */
         else if (!_stricmp(key, "shader_prepare")) o->shader_prepare = !_stricmp(val, "background") ? 1 : !_stricmp(val, "off") ? 2 : 0;
-        else if (!_stricmp(key, "frame_rate")) { int v = atoi(val); o->frame_rate = v < 60 ? 60 : v > 120 ? 120 : v; }      /* [Recomps#1] */
+        else if (!_stricmp(key, "frame_rate")) { int v = atoi(val); o->frame_rate = v < 30 ? 30 : v > 960 ? 960 : v; }      /* [Recomps#1] */
         else if (!_stricmp(key, "hdr")) o->hdr = !_stricmp(val, "off") ? 1 : !_stricmp(val, "on") ? 2 : 0;      /* [Recomps#1] finding 147 */
         else if (!_stricmp(key, "hdr_format")) o->hdr_scrgb = !_stricmp(val, "scrgb");
         else if (!_stricmp(key, "hdr_paper_white")) { float v = (float)atof(val); o->hdr_paper_white = v >= 80.0f && v <= 1000.0f ? v : 0.0f; }      /* auto, or a value out of range */
         else if (!_stricmp(key, "hdr_gamma")) o->hdr_srgb = !_stricmp(val, "srgb");
         else if (!_stricmp(key, "hdr_peak")) { float v = (float)atof(val); o->hdr_peak = v >= 80.0f && v <= 10000.0f ? v : 0.0f; }      /* [moonriver] auto, or a value out of range */
-        else if (!_stricmp(key, "cutscene_fps")) o->cutscene_fps = atoi(val) == 60 ? 60 : 30;      /* [moonriver] */
         else if (!_stricmp(key, "bc7_textures")) o->bc7_textures = !_stricmp(val, "on");      /* #54 */
         else if (!_stricmp(key, "hud_area")) o->hud_centre = !_stricmp(val, "16:9");      /* [moonriver] */
         else if (!_stricmp(key, "aspect_ratio")) { float a, b; int n = sscanf(val, "%f:%f", &a, &b); o->aspect_ratio = !_stricmp(val, "auto") ? -1.0f : n == 2 && b > 0 ? a / b : n == 1 ? a : 0.0f; }      /* [moonriver] */
@@ -333,6 +380,11 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
         o->wide_width = g_opt.wide_width;
     }
     if (getenv("MR_UPSCALER")) o->upscaler = upscaler_of(getenv("MR_UPSCALER"));      /* [moonriver] issue 118 */
+    if (getenv("MR_SHARPNESS")) { float v = (float)atof(getenv("MR_SHARPNESS")) / 100.0f; o->sharpness = v < 0.0f ? 0.0f : v > 1.0f ? 1.0f : v; }
+    {   const char *e = getenv("MR_FRAMEGEN");
+        int kind = o->frame_gen_kind ? o->frame_gen_kind : 1;
+        o->frame_gen = e ? (!_stricmp(e, "on") ? kind : framegen_of(e)) : o->frame_gen_on ? kind : 0;
+    }
     {   /* [moonriver] the mip bias: -1, or MR_TEXTURE_LOD_BIAS (-3 .. 3) */
         const char *e = getenv("MR_TEXTURE_LOD_BIAS");
         if (e) o->texture_lod_bias = (float)atof(e);
@@ -342,13 +394,6 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
     }
     if (!getenv("MR_MODEL_LOD")) _putenv_s("MR_MODEL_LOD", o->model_lod_high ? "highest" : "game");      /* [moonriver] read by the game library */
     else o->model_lod_high = !_stricmp(getenv("MR_MODEL_LOD"), "highest");
-    {   /* [moonriver] cutscene_fps: the game library (game_shim_eh.c) reads MR_CUTSCENE_FPS; a set variable (test runs) wins */
-        const char *e = getenv("MR_CUTSCENE_FPS");
-        if (e) o->cutscene_fps = atoi(e) == 60 ? 60 : 30;
-        else { if (!o->cutscene_fps) o->cutscene_fps = 30; _putenv_s("MR_CUTSCENE_FPS", o->cutscene_fps == 60 ? "60" : "30"); }
-        printf("graphics options: cutscene_fps=%d (%s)%s\n", o->cutscene_fps, e ? "MR_CUTSCENE_FPS" : "graphics.ini",
-               o->cutscene_fps == 60 ? ": the title, menus and cutscenes run at 60 (the game's 60 fps mode; movies keep their own rate)" : ": the title, menus and cutscenes at 30, as on the console");
-    }
     /* [moonriver] aspect_ratio: the game library and the renderer read RECOMPS_ASPECT; a set variable (test runs) wins */
     if (o->aspect_ratio != -1.0f && (!(o->aspect_ratio >= 0.25f && o->aspect_ratio <= 8.0f) || fabsf(o->aspect_ratio - 16.0f / 9.0f) < 0.001f)) o->aspect_ratio = 0.0f;
     if (o->aspect_ratio > 0.0f && !getenv("RECOMPS_ASPECT")) { char n[32]; snprintf(n, sizeof n, "%.6f", o->aspect_ratio); _putenv_s("RECOMPS_ASPECT", n); }
@@ -363,8 +408,13 @@ static BOOL CALLBACK opt_load(PINIT_ONCE once, PVOID arg, PVOID *ctx) {
         int paced = !(pe && !atoi(pe));
         _putenv_s("RECOMPS_UNCAP", "1");
         if (!getenv("RECOMPS_UNCAP_FPS")) _putenv_s("RECOMPS_UNCAP_FPS", paced ? "0" : n);
+        if (paced && !getenv("MR_PACE_RATE")) _putenv_s("MR_PACE_RATE", n);
         printf("graphics options: frame_rate=%d: the game's clock measures real time, %s %d fps (experimental)\n", o->frame_rate,
-               paced ? "the game released and its pictures presented on a steady tick of" : "NOT capped (MR_PACE_120=0; B3 has no lifted limiter), not paced at", o->frame_rate);
+               paced ? "the game released and its pictures presented on a steady tick of" : "NOT capped (MR_PACE_120=0), not paced at", o->frame_rate);
+    } else if (o->frame_rate > 0 && o->frame_rate < 60) {
+        char n[16]; snprintf(n, sizeof n, "%d", o->frame_rate);
+        if (!getenv("MR_PACE_RATE")) _putenv_s("MR_PACE_RATE", n);
+        printf("graphics options: frame_rate=%d: paced at %d fps, keeping real time\n", o->frame_rate, o->frame_rate);
     }
     if (o->profile == 1) {       /* the low-end profile wins over the three keys it sets, wherever they stand in the file (values: O1_options.md, session 9) */
         o->scale = GFX_LOW_SCALE; o->aniso = 0; o->texture_lod_bias = 0.0f; o->present = 0;
@@ -398,7 +448,9 @@ int gfx_pace_rate(void) {
     if (r < 0) {
         const GfxOptions *o = gfx_options();
         const char *e = getenv("MR_PACE_120"), *u = getenv("RECOMPS_UNCAP_FPS");
-        r = o->frame_rate > 60 && !(e && !atoi(e)) && u && !atoi(u) ? o->frame_rate : 60;      /* a test's own limiter rate (RECOMPS_UNCAP_FPS) keeps the old way */
+        if (o->frame_rate > 60) r = !(e && !atoi(e)) && u && !atoi(u) ? o->frame_rate : 60;      /* a test's own limiter rate (RECOMPS_UNCAP_FPS) keeps the old way */
+        else if (o->frame_rate > 0 && o->frame_rate < 60) r = o->frame_rate;
+        else r = 60;
     }
     return r;
 }
@@ -537,14 +589,16 @@ int gfx_option_set(const char *key, const char *val) {
     free(b);
     if (fclose(f) || !MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) { DeleteFileA(tmp); printf("graphics options: %s = %s NOT written to %s\n", key, val, path); return 0; }
     if (!_stricmp(key, "model_lod")) _putenv_s("MR_MODEL_LOD", val);
-    if (!_stricmp(key, "cutscene_fps")) _putenv_s("MR_CUTSCENE_FPS", val);      /* the reader takes the variable it set itself at start */
     GfxOptions t;
     opt_load(NULL, &t, NULL);
     /* the keys that apply while the game runs (each is acted on by pcmenu.c); a key added later that applies live: one line here */
     g_opt.window_mode = t.window_mode; g_opt.width = t.width; g_opt.height = t.height;
-    g_opt.present = t.present; g_opt.aniso = t.aniso; g_opt.aspect_stretch = t.aspect_stretch; g_opt.cutscene_fps = t.cutscene_fps;
+    g_opt.present = t.present; g_opt.aniso = t.aniso; g_opt.aspect_stretch = t.aspect_stretch;
+    g_opt.overlay = t.overlay;
     g_opt.texture_lod_bias = t.texture_lod_bias; g_opt.scale = t.scale; g_opt.hud_centre = t.hud_centre;
     g_opt.model_lod_high = t.model_lod_high; g_opt.no_film_grain = t.no_film_grain; g_opt.upscaler = t.upscaler;
+    g_opt.sharpness = t.sharpness; g_opt.frame_gen = t.frame_gen; g_opt.frame_gen_on = t.frame_gen_on;
+    g_opt.frame_gen_kind = t.frame_gen_kind; g_opt.frame_gen_no_hud = t.frame_gen_no_hud;
     g_opt.hdr = t.hdr; g_opt.hdr_paper_white = t.hdr_paper_white; g_opt.hdr_peak = t.hdr_peak;      /* [moonriver] nvn_vk_draw.c reads them at every present */
     printf("graphics options: %s = %s written to %s\n", key, val, path);
     fflush(stdout);

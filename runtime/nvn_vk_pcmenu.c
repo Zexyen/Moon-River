@@ -34,6 +34,7 @@ typedef struct { VkImage img; VMem mem; VkImageView view; VkDescriptorSet set; i
 static struct {
     int tried, on;                                 /* on: the GPU path; decided at the first upload */
     VkSampler smp; VkDescriptorSetLayout dl; VkPipelineLayout pl; VkDescriptorPool dp; VkShaderModule vs, fs; VkPipeline pipe;
+    VkRenderPass rp; VkFramebuffer canvas_fb;      /* [issue 55] when D.use_rp */
     PcmTex tex[PCM_NTEX];                          /* the art (PCM_NART), then the hubs layer, the words layer and the ground, of the canvas's size */
     VkImage canvas; VMem canvas_mem; VkImageView canvas_view; int cw, ch;
     VkBuffer art_buf; VMem art_mem; uint64_t art_off[PCM_NART]; int art_staged, art_uploaded;      /* the art's staging: filled once, copied by a present, then freed */
@@ -41,8 +42,24 @@ static struct {
     int have[2];                                   /* the staging buffer holds a hubs / words layer for this version */
     unsigned ground_gen;                           /* the panel version whose ground the ground texture holds (~0u: none) */
 } g_gpu;
-static struct { VkBuffer buf; VMem mem; uint64_t size; unsigned gen; int r[4], ready, panel; } g_pcm;      /* panel: whose pixels these are (pcmenu_kind) */
+/* Double-buffered staging so 1 Hz perf-overlay redraws (kind 2) flip to the idle slot instead of draining the GPU. */
+#define PCM_STG_N 2
+typedef struct { VkBuffer buf; VMem mem; uint64_t size, serial; } PcmStg;
+static struct { PcmStg stg[PCM_STG_N]; int cur; unsigned gen; int r[4], ready, panel; } g_pcm;      /* panel: whose pixels these are (pcmenu_kind) */
 static struct { VkBuffer buf; VMem mem; uint64_t size; int w, h, pending, n, said; } g_pcm_shot;
+#if defined(NSLOT) && !defined(PCM_NO_CMD_SERIAL)
+static void pcm_stg_wait(uint64_t serial) {
+    if (!serial || serial <= R.done) return;
+    for (int i = 0; i < NSLOT; i++)
+        if (R.slot[i].pending && vkGetFenceStatus(V.device, R.slot[i].fence) == VK_SUCCESS)
+            slot_wait(&R.slot[i]);
+    if (serial > R.done) cmd_wait_all();
+}
+static uint64_t pcm_cmd_serial(void) { return R.serial + 1; }
+#elif !defined(PCM_NO_CMD_SERIAL)
+static void pcm_stg_wait(uint64_t serial) { if (serial) cmd_wait_all(); }
+static uint64_t pcm_cmd_serial(void) { return 1; }
+#endif
 
 /* ---- the GPU path ---- */
 /* One pipeline draws every sprite: a quad of half size h about the centre c, turned by rot (cos, sin), its texture
@@ -162,7 +179,19 @@ static VkPipeline pcm_gpu_pipeline(void) {
     VkPipelineRenderingCreateInfo ren = {VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
     ren.colorAttachmentCount = 1; ren.pColorAttachmentFormats = &cf;
     VkGraphicsPipelineCreateInfo gi = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-    gi.pNext = &ren; gi.stageCount = 2; gi.pStages = st; gi.pVertexInputState = &vin; gi.pInputAssemblyState = &ia; gi.pViewportState = &vps;
+    if (D.use_rp) {
+        if (!g_gpu.rp) {
+            VkAttachmentDescription att = {0, cf, VK_SAMPLE_COUNT_1_BIT, VK_ATTACHMENT_LOAD_OP_LOAD, VK_ATTACHMENT_STORE_OP_STORE, VK_ATTACHMENT_LOAD_OP_DONT_CARE, VK_ATTACHMENT_STORE_OP_DONT_CARE, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+            VkAttachmentReference ref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+            VkSubpassDescription sub; memset(&sub, 0, sizeof sub);
+            sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; sub.colorAttachmentCount = 1; sub.pColorAttachments = &ref;
+            VkRenderPassCreateInfo rpi = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+            rpi.attachmentCount = 1; rpi.pAttachments = &att; rpi.subpassCount = 1; rpi.pSubpasses = &sub;
+            VKC(vkCreateRenderPass(V.device, &rpi, NULL, &g_gpu.rp));
+        }
+        gi.renderPass = g_gpu.rp;
+    } else gi.pNext = &ren;
+    gi.stageCount = 2; gi.pStages = st; gi.pVertexInputState = &vin; gi.pInputAssemblyState = &ia; gi.pViewportState = &vps;
     gi.pRasterizationState = &rs; gi.pMultisampleState = &ms; gi.pColorBlendState = &cb; gi.pDynamicState = &ds; gi.layout = g_gpu.pl;
     VkResult r = vkCreateGraphicsPipelines(V.device, NULL, 1, &gi, NULL, &g_gpu.pipe);
     if (r != VK_SUCCESS) { printf("pcmenu: THE DRIVER REFUSED the panel's pipeline (%s): the panel is composed on the CPU\n", vk_result_name(r)); fflush(stdout); g_gpu.pipe = NULL; return NULL; }
@@ -192,6 +221,7 @@ static void pcm_gpu_art_stage(void) {
 static void pcm_gpu_canvas(int w, int h) {
     if (g_gpu.canvas && g_gpu.cw == w && g_gpu.ch == h) return;
     cmd_wait_all();                                /* a present may still draw with them */
+    if (g_gpu.canvas_fb) { vkDestroyFramebuffer(V.device, g_gpu.canvas_fb, NULL); g_gpu.canvas_fb = NULL; }
     if (g_gpu.canvas) { vkDestroyImageView(V.device, g_gpu.canvas_view, NULL); vkDestroyImage(V.device, g_gpu.canvas, NULL); vmem_free(g_gpu.canvas_mem); g_gpu.canvas = NULL; g_gpu.canvas_view = NULL; }
     for (int k = 0; k < 3; k++) pcm_tex_free(&g_gpu.tex[PCM_NART + k]);
     g_gpu.cw = w; g_gpu.ch = h; g_gpu.layers_gen = g_gpu.ground_gen = ~0u;
@@ -213,9 +243,10 @@ static void pcm_tex_upload(PcmTex *t, VkBuffer buf, uint64_t off) {      /* the 
 /* the panel composed on the canvas and copied over the picture at r (in the present's commands, tgt in TRANSFER_DST) */
 static void pcm_gpu_draw(VkImage tgt, const int r[4]) {
     uint64_t one = (uint64_t)r[2] * (uint64_t)r[3] * 4;
+    PcmStg *st = &g_pcm.stg[g_pcm.cur];
     if (!g_gpu.art_uploaded && g_gpu.art_buf) { for (int i = 0; i < PCM_NART; i++) if (g_gpu.tex[i].img) pcm_tex_upload(&g_gpu.tex[i], g_gpu.art_buf, g_gpu.art_off[i]); g_gpu.art_uploaded = 1; }
     if (g_gpu.layers_gen != g_pcm.gen) {
-        for (int k = 0; k < 2; k++) { PcmTex *t = &g_gpu.tex[PCM_NART + k]; t->ready = 0; if (g_gpu.have[k]) pcm_tex_upload(t, g_pcm.buf, one * (1 + k)); }
+        for (int k = 0; k < 2; k++) { PcmTex *t = &g_gpu.tex[PCM_NART + k]; t->ready = 0; if (g_gpu.have[k]) pcm_tex_upload(t, st->buf, one * (1 + k)); }
         g_gpu.layers_gen = g_pcm.gen;
     }
     PcmSprite sp[PCM_NSPR];
@@ -231,14 +262,15 @@ static void pcm_gpu_draw(VkImage tgt, const int r[4]) {
     ic.extent = c.imageExtent;
     image_barrier(g_gpu.canvas, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     if (over) {                                    /* the game's picture under the panel, and the ground as a texture */
-        if (g_gpu.ground_gen != g_pcm.gen) { pcm_tex_upload(&g_gpu.tex[PCM_NART + 2], g_pcm.buf, 0); g_gpu.ground_gen = g_pcm.gen; }
+        if (g_gpu.ground_gen != g_pcm.gen) { pcm_tex_upload(&g_gpu.tex[PCM_NART + 2], st->buf, 0); g_gpu.ground_gen = g_pcm.gen; }
         xfer_wait();                               /* after the blit of the game's picture */
         image_barrier(tgt, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         ic.srcOffset.x = r[0]; ic.srcOffset.y = r[1];
         vkCmdCopyImage(R.cmd, tgt, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_gpu.canvas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ic);
         image_barrier(tgt, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
         ic.srcOffset.x = ic.srcOffset.y = 0;
-    } else vkCmdCopyBufferToImage(R.cmd, g_pcm.buf, g_gpu.canvas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);      /* the ground */
+    } else vkCmdCopyBufferToImage(R.cmd, st->buf, g_gpu.canvas, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);      /* the ground */
+    st->serial = pcm_cmd_serial();
     image_barrier(g_gpu.canvas, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     VkRenderingAttachmentInfo ca = {VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     ca.imageView = g_gpu.canvas_view; ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; ca.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -246,7 +278,17 @@ static void pcm_gpu_draw(VkImage tgt, const int r[4]) {
     ri.renderArea.extent.width = (uint32_t)r[2]; ri.renderArea.extent.height = (uint32_t)r[3]; ri.layerCount = 1; ri.colorAttachmentCount = 1; ri.pColorAttachments = &ca;
     VkViewport vp = {0, 0, (float)r[2], (float)r[3], 0, 1};
     VkRect2D sc = {{0, 0}, {(uint32_t)r[2], (uint32_t)r[3]}};
-    vkCmdBeginRendering(R.cmd, &ri);
+    if (D.use_rp) {
+        if (!g_gpu.canvas_fb) {
+            VkFramebufferCreateInfo fbi = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+            fbi.renderPass = g_gpu.rp; fbi.attachmentCount = 1; fbi.pAttachments = &g_gpu.canvas_view;
+            fbi.width = (uint32_t)g_gpu.cw; fbi.height = (uint32_t)g_gpu.ch; fbi.layers = 1;
+            VKC(vkCreateFramebuffer(V.device, &fbi, NULL, &g_gpu.canvas_fb));
+        }
+        VkRenderPassBeginInfo rbi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        rbi.renderPass = g_gpu.rp; rbi.framebuffer = g_gpu.canvas_fb; rbi.renderArea.extent = ri.renderArea.extent;
+        vkCmdBeginRenderPass(R.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE);
+    } else vkCmdBeginRendering(R.cmd, &ri);
     vkCmdBindPipeline(R.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g_gpu.pipe);
     vkCmdSetViewport(R.cmd, 0, 1, &vp); vkCmdSetScissor(R.cmd, 0, 1, &sc);
     for (int i = 0; i < n; i++) {
@@ -262,7 +304,7 @@ static void pcm_gpu_draw(VkImage tgt, const int r[4]) {
         vkCmdPushConstants(R.cmd, g_gpu.pl, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof pc, &pc);
         vkCmdDraw(R.cmd, 6, 1, 0, 0);
     }
-    vkCmdEndRendering(R.cmd);
+    if (D.use_rp) vkCmdEndRenderPass(R.cmd); else vkCmdEndRendering(R.cmd);
     R.pipe_bound = NULL; R.dyn_dirty = 1; R.dyn3_dirty = 1;
     dsh_forget();
     image_barrier(g_gpu.canvas, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -316,21 +358,26 @@ static void pcm_upload(int wait) {
         if (wait) cmd_wait_all();
         vkDestroyBuffer(V.device, g_gpu.art_buf, NULL); vmem_free(g_gpu.art_mem); g_gpu.art_buf = VK_NULL_HANDLE;
     }
+    if (!V.extent.width || !V.extent.height) return;
     if (pcmenu_panel_size((int)V.extent.width, (int)V.extent.height, r, &gen) && (gen != g_pcm.gen || !g_pcm.ready)) {
-        uint64_t one = (uint64_t)r[2] * (uint64_t)r[3] * 4, need = g_gpu.on ? 3 * one : one;
-        if (wait) cmd_wait_all();                          /* the staging buffer may be read by a present in flight */
-        if (need > g_pcm.size) {
-            if (g_pcm.buf) { vkDestroyBuffer(V.device, g_pcm.buf, NULL); vmem_free(g_pcm.mem); }
-            g_pcm.buf = vbuf_new(need, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &g_pcm.mem); g_pcm.size = need;
+        int kind = pcmenu_kind(), use_gpu = g_gpu.on && kind != 2;      /* kind 2 (perf overlay) copies straight to tgt; never touch g_gpu.canvas */
+        int next = kind == 2 ? (g_pcm.cur ^ 1) : 0;
+        PcmStg *st = &g_pcm.stg[next];
+        uint64_t one = (uint64_t)r[2] * (uint64_t)r[3] * 4, need = use_gpu ? 3 * one : one;
+        if (wait) pcm_stg_wait(st->serial);                             /* only wait if THIS staging slot is still in flight */
+        if (need > st->size) {
+            if (st->buf) { vkDestroyBuffer(V.device, st->buf, NULL); vmem_free(st->mem); }
+            st->buf = vbuf_new(need, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &st->mem); st->size = need; st->serial = 0;
         }
-        pcmenu_panel_read(g_pcm.mem.map, r[2], r[3]);
-        if (g_gpu.on) {                            /* the layers after the ground; the canvas and the layer textures at the panel's size */
-            g_gpu.have[0] = pcmenu_layer_read(1, (uint8_t *)g_pcm.mem.map + one, r[2], r[3]);
-            g_gpu.have[1] = pcmenu_layer_read(2, (uint8_t *)g_pcm.mem.map + 2 * one, r[2], r[3]);
+        pcmenu_panel_read(st->mem.map, r[2], r[3]);
+        if (use_gpu) {                             /* the layers after the ground; the canvas and the layer textures at the panel's size */
+            g_gpu.have[0] = pcmenu_layer_read(1, (uint8_t *)st->mem.map + one, r[2], r[3]);
+            g_gpu.have[1] = pcmenu_layer_read(2, (uint8_t *)st->mem.map + 2 * one, r[2], r[3]);
             if (!g_gpu.art_staged) pcm_gpu_art_stage();
             pcm_gpu_canvas(r[2], r[3]);
         }
-        memcpy(g_pcm.r, r, sizeof r); g_pcm.gen = gen; g_pcm.ready = 1; g_pcm.panel = pcmenu_kind();
+        g_pcm.cur = next;
+        memcpy(g_pcm.r, r, sizeof r); g_pcm.gen = gen; g_pcm.ready = 1; g_pcm.panel = kind;
         if (getenv("MR_PCMENU_SHOT")) g_pcm_shot.pending = -1;       /* the next present */
     }
 }
@@ -342,10 +389,12 @@ static void pcm_vk_draw(VkImage tgt) {
     memset(&c, 0, sizeof c);
     c.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; c.imageSubresource.layerCount = 1;
     c.imageOffset.x = r[0]; c.imageOffset.y = r[1]; c.imageExtent.width = (uint32_t)r[2]; c.imageExtent.height = (uint32_t)r[3]; c.imageExtent.depth = 1;
-    if (g_gpu.on && g_pcm.panel != 2 && g_gpu.canvas && g_gpu.cw == r[2] && g_gpu.ch == r[3]) pcm_gpu_draw(tgt, r);      /* (the hint is copied as drawn) */
+    if (g_gpu.on && g_pcm.panel != 2 && g_gpu.canvas && g_gpu.cw == r[2] && g_gpu.ch == r[3]) pcm_gpu_draw(tgt, r);      /* (the perf overlay is copied as drawn) */
     else {
+        PcmStg *st = &g_pcm.stg[g_pcm.cur];
         xfer_wait();                               /* over the blit of the game's picture */
-        vkCmdCopyBufferToImage(R.cmd, g_pcm.buf, tgt, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+        vkCmdCopyBufferToImage(R.cmd, st->buf, tgt, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+        st->serial = pcm_cmd_serial();
     }
     if (g_pcm_shot.pending == -1 && pcmenu_settled()) {      /* (the menu: once it has opened, not its slide's first frame) */
         g_pcm_shot.pending = 0;
@@ -363,11 +412,15 @@ static void pcm_vk_draw(VkImage tgt) {
     }
 }
 static void pcm_vk_free(void) {                    /* the shutdown, the device idle */
-    if (g_pcm.buf) { vkDestroyBuffer(V.device, g_pcm.buf, NULL); vmem_free(g_pcm.mem); g_pcm.buf = VK_NULL_HANDLE; }
+    for (int i = 0; i < PCM_STG_N; i++) if (g_pcm.stg[i].buf) {
+        vkDestroyBuffer(V.device, g_pcm.stg[i].buf, NULL); vmem_free(g_pcm.stg[i].mem);
+        g_pcm.stg[i].buf = VK_NULL_HANDLE; g_pcm.stg[i].size = g_pcm.stg[i].serial = 0;
+    }
     if (g_pcm_shot.buf) { vkDestroyBuffer(V.device, g_pcm_shot.buf, NULL); vmem_free(g_pcm_shot.mem); g_pcm_shot.buf = VK_NULL_HANDLE; }
     if (g_gpu.art_buf) { vkDestroyBuffer(V.device, g_gpu.art_buf, NULL); vmem_free(g_gpu.art_mem); g_gpu.art_buf = VK_NULL_HANDLE; }
     for (int i = 0; i < PCM_NTEX; i++) pcm_tex_free(&g_gpu.tex[i]);
     pcm_gpu_canvas(0, 0);
+    if (g_gpu.rp) vkDestroyRenderPass(V.device, g_gpu.rp, NULL);
     if (g_gpu.pipe) vkDestroyPipeline(V.device, g_gpu.pipe, NULL);
     if (g_gpu.pl) vkDestroyPipelineLayout(V.device, g_gpu.pl, NULL);
     if (g_gpu.dp) vkDestroyDescriptorPool(V.device, g_gpu.dp, NULL);
@@ -375,5 +428,5 @@ static void pcm_vk_free(void) {                    /* the shutdown, the device i
     if (g_gpu.smp) vkDestroySampler(V.device, g_gpu.smp, NULL);
     if (g_gpu.vs) vkDestroyShaderModule(V.device, g_gpu.vs, NULL);
     if (g_gpu.fs) vkDestroyShaderModule(V.device, g_gpu.fs, NULL);
-    g_gpu.pipe = NULL; g_gpu.pl = NULL; g_gpu.dp = NULL; g_gpu.dl = NULL; g_gpu.smp = NULL; g_gpu.vs = g_gpu.fs = NULL;
+    g_gpu.rp = NULL; g_gpu.pipe = NULL; g_gpu.pl = NULL; g_gpu.dp = NULL; g_gpu.dl = NULL; g_gpu.smp = NULL; g_gpu.vs = g_gpu.fs = NULL;
 }

@@ -905,6 +905,7 @@ static VkPipeline gpl_olib(const PKey *k0) {
  * fragment stage has a second library holding the (empty) fragment shader state as well. Sample shading (never met:
  * 0 of 1,380 recorded keys) takes the pair library path. */
 static VkDescriptorSetLayout g_udl[2];
+static unsigned g_ubuf_storage, g_ubuf_uniform;    /* descriptors required per universal buffer set */
 static VkPipelineLayout g_ulayout;
 static int gpl_sep(void) { static int m = -1; if (m < 0) m = D.has_gpl && vk_gpl_mode() >= 2; return m; }
 static void gpl_universal(void) {
@@ -919,6 +920,9 @@ static void gpl_universal(void) {
             for (unsigned u = 0; u < 32; u++) { VkDescriptorSetLayoutBinding b = {40u * s + u, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, sf, NULL}; b1[n1++] = b; b.binding += 240; b1[n1++] = b; }
             for (unsigned k = 0; k < 8; k++) { VkDescriptorSetLayoutBinding b = {40u * s + 32 + k, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, sf, NULL}; b1[n1++] = b; }      /* [moonriver] storage images */
         }
+        g_ubuf_uniform = 0;
+        for (int i = 0; i < n0; i++) if (b0[i].descriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER) g_ubuf_uniform += b0[i].descriptorCount;
+        g_ubuf_storage = (unsigned)n0 - g_ubuf_uniform;      /* every binding above has one descriptor */
         for (int i = 0; i < 2; i++) {
             VkDescriptorSetLayoutCreateInfo li = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
             li.bindingCount = (uint32_t)(i ? n1 : n0); li.pBindings = i ? b1 : b0;
@@ -1180,7 +1184,14 @@ whole:;
     if (fmt_aspect((VkFormat)k->dfmt) & VK_IMAGE_ASPECT_DEPTH_BIT) ri.depthAttachmentFormat = (VkFormat)k->dfmt;
     if (k->dfmt && (fmt_aspect((VkFormat)k->dfmt) & VK_IMAGE_ASPECT_STENCIL_BIT)) ri.stencilAttachmentFormat = (VkFormat)k->dfmt;
     VkGraphicsPipelineCreateInfo gi = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-    gi.pNext = &ri; gi.stageCount = nst; gi.pStages = st; gi.pTessellationState = p->tcs ? &ts : NULL; gi.pInputAssemblyState = &ia; gi.pViewportState = &vp; gi.pRasterizationState = &rs; gi.pMultisampleState = &ms;
+    if (D.use_rp) {
+        RpKey rk;
+        memset(&rk, 0, sizeof rk);
+        rk.ncolor = k->ncolor; rk.dfmt = k->dfmt; rk.samples = k->samples ? k->samples : 1;
+        for (int i = 0; i < k->ncolor && i < 8; i++) rk.cfmt[i] = k->cfmt[i];
+        gi.renderPass = rp_get(&rk);
+    } else gi.pNext = &ri;
+    gi.stageCount = nst; gi.pStages = st; gi.pTessellationState = p->tcs ? &ts : NULL; gi.pInputAssemblyState = &ia; gi.pViewportState = &vp; gi.pRasterizationState = &rs; gi.pMultisampleState = &ms;
     gi.pDepthStencilState = &ds; gi.pColorBlendState = &cb; gi.pDynamicState = &dy; gi.layout = p->layout;
     if (!D.has_vids) gi.pVertexInputState = &vi;
     static volatile LONG nfail;
@@ -2074,9 +2085,10 @@ void nvn_vk_program_set(void *prog) {
     /* session 7: in a fight the caller (the game's main thread) is not held at all: a draw that needs the program waits for it
      * on the render thread, a program not drawn in this frame costs nothing */
     if (!fr && (g_jq_queued - g_jq_done > g_pw_nthread || g_bq_queued > g_bq_done)) {
+        extern volatile LONG g_display_close;
         LONG64 t0 = tk();
         LARGE_INTEGER fq; QueryPerformanceFrequency(&fq);
-        while ((g_jq_queued - g_jq_done > g_pw_nthread || g_bq_queued > g_bq_done) && tk() - t0 < 30 * fq.QuadPart) WD_SLEEP(&g_sh_cv, &g_sh_lock, 100);
+        while (!g_m4_quit && !g_display_close && (g_jq_queued - g_jq_done > g_pw_nthread || g_bq_queued > g_bq_done) && tk() - t0 < 30 * fq.QuadPart) WD_SLEEP(&g_sh_cv, &g_sh_lock, 100);
         g_set_held++; g_set_held_tk += tk() - t0;
         nvn_setsh_part[7] += tk() - t0;
     }
@@ -2266,7 +2278,7 @@ static void scan_list(uint64_t handle, int depth, Scan *s) {
         case OP_CALL: for (int i = 0; i < (int)a[0]; i++) { uint64_t h; memcpy(&h, BLOB(m) + i * 8, 8); if (depth < 8) scan_list(h, depth + 1, s); } break;
         default: break;
         }
-        off += m->size;
+        off += m->next_scan ? (size_t)m->next_scan * 8 : m->size;    /* zero at the tail or across a long gap: walk normally */
     }
 }
 static void prewarm_wait(void) {                   /* render thread, before its first batch */
@@ -2336,11 +2348,17 @@ static void m4_stop(void) {
     EnterCriticalSection(&g_sh_lock);
     g_m4_on = 0; g_m4_quit = 1;
     WakeAllConditionVariable(&g_jq_cv);
+    WakeAllConditionVariable(&g_sh_cv);
     LeaveCriticalSection(&g_sh_lock);
     WaitForMultipleObjects((DWORD)g_pw_nthread, g_pw_thread, TRUE, 60000);
     for (int i = 0; i < g_pw_nthread; i++) CloseHandle(g_pw_thread[i]);
     g_pw_nthread = 0;
     if (g_prep_thread) { WaitForSingleObject(g_prep_thread, 30000); CloseHandle(g_prep_thread); g_prep_thread = NULL; }
+    EnterCriticalSection(&g_sh_lock);
+    while (g_jq_head) { Job *n = g_jq_head->next; free(g_jq_head); g_jq_head = n; } g_jq_tail = NULL;
+    while (g_bq_head) { Job *n = g_bq_head->next; free(g_bq_head); g_bq_head = n; } g_bq_tail = NULL;
+    while (g_pq_head) { Job *n = g_pq_head->next; free(g_pq_head); g_pq_head = n; } g_pq_tail = NULL;
+    LeaveCriticalSection(&g_sh_lock);
     if (g_warm_thread) { WaitForSingleObject(g_warm_thread, 30000); CloseHandle(g_warm_thread); g_warm_thread = NULL; }      /* [moonriver] it ends after the stage it is at */
     if (g_rs_thread) {
         EnterCriticalSection(&g_rs_lock); WakeAllConditionVariable(&g_rs_cv); LeaveCriticalSection(&g_rs_lock);

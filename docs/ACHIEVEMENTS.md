@@ -2,15 +2,15 @@
 
 Moon River integrates with [Recomp Achievements](https://github.com/elripalda/RecompAchievements) (`runtime/achievements.c`, `runtime/achievements.h`, `games/bayonetta2/runtime/game_shim_eh.c`). Started without `RL_SESSION`, every entry point is a complete no-op.
 
-- **Total**: **50** achievements (**1,710** points):
-  - **17 Story Chapter Clears** (IDs `1..17`, 255 pts — 15 pts each, any difficulty).
-  - **3 Game Completion / Difficulty Achievements** (IDs `18..20`, 225 pts — higher difficulties retroactively unlock lower ones).
-  - **2 All-Chapter Mastery Achievements** (IDs `21`, `50`, 250 pts — all Platinum on any difficulty; all Pure Platinum on ∞ Climax).
+- **Total**: **50** achievements (**1,305** points, on RecompLauncher's 5 / 10 / 25 / 50 point scale; hosted in [`docs/achievements.json`](achievements.json)):
+  - **17 Story Chapter Clears** (IDs `1..17`, 170 pts — 10 pts each, any difficulty).
+  - **3 Game Completion / Difficulty Achievements** (IDs `18..20`, 150 pts — 50 pts each; higher difficulties retroactively unlock lower ones).
+  - **2 All-Chapter Mastery Achievements** (IDs `21`, `50`, 100 pts — 50 pts each; all Platinum on any difficulty; all Pure Platinum on ∞ Climax).
   - **17 ∞ Climax Pure Platinum Chapter Achievements** (IDs `22..38`, 425 pts — 25 pts each, Pure Platinum on ∞ Climax only).
-  - **2 Secret Boss & Boss Mastery Achievements** (IDs `39..40`, 150 pts — Rodin & Balder No-Damage).
-  - **4 Arsenal, Techniques & Exploration Achievements** (IDs `41..44`, 200 pts — all 13 Bayonetta 2 weapons, all Umbran Techniques, all 22 Muspelheim challenges, and all Umbra Witches' final resting places).
-  - **5 Witch Trial Achievements** (IDs `45..49`, 205 pts — Witch Trials I–V).
-- **Unlocks & saves**: Live unlocks fire through post-lift hooks in `f_7100d943b4` (chapter clear / Play History commit), `f_7100d9045c` (story Bewitchments), and `f_7100d8fa50` / `f_7100d96c68` (weapon unlocks). Pre-existing progress loaded from `SAVE:/save*.sav` (excluding `savesystem.sav`) opens a 180-frame grace window via `achievements_save_loaded()` and is reconciled from `save_obj` (`*(uint64_t *)0x71018668d0`) chapter slots (`save_obj + 500 + diff * 0x804 + ch * 0x4c`, best medal at `+16`, clear state at `+68`), Bewitchment bits (`save_obj + 432`), and weapon bits (`save_obj + 0xa46c`), reported with `earlier: true`.
+  - **2 Secret Boss & Boss Mastery Achievements** (IDs `39..40`, 100 pts — 50 pts each; Rodin & Balder No-Damage).
+  - **4 Arsenal, Techniques & Exploration Achievements** (IDs `41..44`, 200 pts — 50 pts each; all 13 Bayonetta 2 weapons, all Umbran Techniques, all 22 Muspelheim challenges, and all Umbra Witches' final resting places).
+  - **5 Witch Trial Achievements** (IDs `45..49`, 160 pts — Witch Trials I–V: 10 / 25 / 25 / 50 / 50 pts).
+- **Unlocks & saves**: Live unlocks fire as named events (`rl_ach_event`, matching `docs/achievements.json`) through post-lift hooks in `f_7100d943b4` (chapter clear / Play History commit), `f_7100d9045c` (story Bewitchments), and `f_7100d8fa50` / `f_7100d96c68` (weapon unlocks). Pre-existing progress loaded from `SAVE:/save*.sav` (excluding `savesystem.sav`) opens a 180-frame grace window via `achievements_save_loaded()` and is reconciled from `save_obj` (`*(uint64_t *)0x71018668d0`) chapter slots (`save_obj + 500 + diff * 0x804 + ch * 0x4c`, best medal at `+16`, clear state at `+68`), Bewitchment bits (`save_obj + 432`), and weapon bits (`save_obj + 0xa46c`), announced after `save_loaded` so RecompLauncher classifies them as Casual.
 - **Rich Presence**: Updated every 64 frames via `rl_ach_presence()` from `game_presence[4]` (current chapter from `f_7100b22a60`, difficulty from `save_obj + 492` or each Witch Trial's fixed difficulty).
 
 ---

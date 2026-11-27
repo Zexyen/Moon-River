@@ -19,6 +19,7 @@
 #include "gfx_options.h"
 typedef struct { int block; uint64_t off, size; void *map; VkDeviceMemory mem; } VMem;
 static struct { VkInstance inst; VkPhysicalDevice pd; VkPhysicalDeviceMemoryProperties mp; VkDevice device; VkQueue queue; uint32_t qf; VkExtent2D extent; int hdr, alive; VkSwapchainKHR swapchain; } V;
+static struct { int use_rp; } D;
 static struct { VkCommandPool pool; VkCommandBuffer cmd; void *pipe_bound; int dyn_dirty, dyn3_dirty, in_pass; } R;
 static void vk_fatal(const char *what, VkResult r) { printf("FATAL %s: %d\n", what, (int)r); exit(2); }
 #define VKC(call) do { VkResult r_ = (call); if (r_ != VK_SUCCESS) vk_fatal(#call, r_); } while (0)
@@ -73,6 +74,9 @@ static void present_mode_pick(void) {} static void swapchain_destroy(void) {} st
 typedef struct { void *win; } PresentJob; static PresentJob g_pcm_last; static void vk_present2(void *a, int p) { (void)a; (void)p; }
 typedef struct { char path[300]; uint8_t *px; int w, h, bgr; } BmpJob; static LONG g_bmp_pending; static void bmp_write_thread(BmpJob *j) { free(j->px); free(j); }
 static int g_sc_src;
+#define PCM_NO_CMD_SERIAL
+static uint64_t pcm_cmd_serial(void) { return 0; }
+static void pcm_stg_wait(uint64_t serial) { if (serial) cmd_wait_all(); }
 static void pcm_upload(int wait); static void pcm_vk_draw(VkImage tgt); static void pcm_vk_free(void);
 #include "../../runtime/nvn_vk_pcmenu.c"
 void t_setup(int which, int anim);

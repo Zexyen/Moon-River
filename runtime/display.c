@@ -5,6 +5,10 @@
 #include <string.h>
 #include <windows.h>
 #include <math.h>
+#ifdef __linux__
+#include <time.h>
+#include <errno.h>
+#endif
 #include "runtime.h"
 #include "hostrt.h"
 #include "gfx_options.h"
@@ -80,7 +84,7 @@ static volatile LONG g_vb_state;                       /* 0 not started, 1 measu
 static int g_pace_want = -1;                           /* 0 clock, 1 display lock when the refresh rate allows */
 static int g_hold_on = -1;                             /* present at the tick */
 static volatile LONG g_lock_k;                         /* display lock: refreshes per game frame, 0 = our own clock */
-static int g_pace_hz = 60;                             /* [Recomps#1] the ticks per second: 60, or frame_rate above 60 (gfx_options.c gfx_pace_rate); the guest's vsync event stays at 60 */
+static int g_pace_hz = 60;                             /* [Recomps#1] the ticks per second: 60, or frame_rate (30 .. 960; gfx_options.c gfx_pace_rate); the guest's vsync event stays at 60 */
 static volatile LONG64 g_lock_drops, g_lock_relocks;   /* [Recomps#1] finding 122: lock lost after a vblank gap / taken again */
 static volatile LONG64 g_drift_drops, g_drift_relocks; /* [Recomps#1] finding 125 (vsync = auto): lock dropped because the game's speed under it left 60 +-1.1 % / taken again */
 static int g_pace_auto;                                /* vsync = auto: the drift check may drop the lock (display: it only says so) */
@@ -146,6 +150,14 @@ void display_perf_thread(void) {
     if (g_pc_on && g_pc_n > 0) SetThreadSelectedCpuSets(GetCurrentThread(), g_pc_ids, (ULONG)g_pc_n);
 }
 static void precise_wait_until(LONGLONG target, HANDLE timer) {
+#ifdef __linux__
+    /* On Linux QueryPerformanceCounter is CLOCK_MONOTONIC in nanoseconds (plat.h). Sleeping to an absolute
+     * deadline via clock_nanosleep wakes within ~20-50 us without the 0.5 ms YieldProcessor() spin that keeps
+     * Steam Deck / mobile APU clocks elevated and fans spinning. */
+    (void)timer;
+    struct timespec ts = { (time_t)(target / 1000000000LL), (long)(target % 1000000000LL) };
+    while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL) == EINTR) {}
+#else
     LARGE_INTEGER now, due;
     QueryPerformanceCounter(&now);
     LONGLONG left = target - now.QuadPart;
@@ -153,6 +165,7 @@ static void precise_wait_until(LONGLONG target, HANDLE timer) {
     due.QuadPart = -((left - g_freq.QuadPart / 2000) * 10000000 / g_freq.QuadPart);
     if (due.QuadPart < 0) { if (timer && SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE)) WaitForSingleObject(timer, 100); else Sleep((DWORD)(left * 1000 / g_freq.QuadPart)); }
     for (QueryPerformanceCounter(&now); now.QuadPart < target; QueryPerformanceCounter(&now)) YieldProcessor();
+#endif
 }
 static DWORD WINAPI vblank_thread(LPVOID arg) {
     (void)arg;
@@ -230,7 +243,8 @@ static void pace_options(void) {
     g_pace_hz = gfx_pace_rate();
     printf("display: pacing: %s %d Hz%s; a finished frame is presented %s%s%c", g_pace_want ? "locked to the display when its refresh rate is k x" : "our own clock at",
            g_pace_hz, g_pace_want ? " within 1.1 % (vsync = display / auto), else our own clock" : " (vsync = clock)", g_hold_on ? "at the next tick (steady cadence)" : "as soon as it is ready",
-           g_pace_hz > 60 ? "; frame_rate above 60: the game is released on these ticks and its interval 0 is one tick, the guest's vsync event stays at 60 Hz" : "", 10);
+           g_pace_hz > 60 ? "; frame_rate above 60: the game is released on these ticks and its interval 0 is one tick, the guest's vsync event stays at 60 Hz"
+                          : g_pace_hz < 60 ? "; frame_rate below 60: the game is paced on these ticks, keeping real time" : "", 10);
 }
 /* [moonriver] vsync changed in the PC menu (pcmenu.c): the pacing is chosen again (nvn_vk makes the swapchain again for the present
  * mode). A display lock is let go when it is no longer wanted; one is taken while the game runs only if none was tried yet. */
@@ -450,6 +464,7 @@ static DWORD WINAPI window_thread(LPVOID arg) {
     if (visible) {                                   /* [Recomps#1] raw mouse movement for the mouse camera (WM_INPUT, foreground only) */
         RAWINPUTDEVICE rid = {1, 2, 0, g_hwnd};       /* generic desktop, mouse */
         RegisterRawInputDevices(&rid, 1, sizeof rid);
+        { HMODULE imm = LoadLibraryA("imm32.dll"); void *(WINAPI *iac)(HWND, void *) = imm ? (void *(WINAPI *)(HWND, void *))(void *)GetProcAddress(imm, "ImmAssociateContext") : NULL; if (iac) iac(g_hwnd, NULL); }      /* disable IME on the gameplay window so East Asian IMEs do not intercept Shift/keys or steal focus */
         atexit(mouse_release);
     }
     gfx_aspect_window(cw, ch);                       /* [moonriver] aspect_ratio = auto: the client size (borderless / fullscreen: the monitor) */
@@ -520,9 +535,10 @@ static SDL_Scancode vk_scancode(int vk) {
     case 0x21: return SDL_SCANCODE_PAGEUP;        case 0x22: return SDL_SCANCODE_PAGEDOWN;    case 0x23: return SDL_SCANCODE_END;
     case 0x24: return SDL_SCANCODE_HOME;          case VK_LEFT: return SDL_SCANCODE_LEFT;     case VK_UP: return SDL_SCANCODE_UP;
     case VK_RIGHT: return SDL_SCANCODE_RIGHT;     case VK_DOWN: return SDL_SCANCODE_DOWN;     case 0x2D: return SDL_SCANCODE_INSERT;
-    case 0x2E: return SDL_SCANCODE_DELETE;        case VK_LSHIFT: return SDL_SCANCODE_LSHIFT; case VK_RSHIFT: return SDL_SCANCODE_RSHIFT;
-    case VK_LCONTROL: return SDL_SCANCODE_LCTRL;  case VK_RCONTROL: return SDL_SCANCODE_RCTRL; case VK_LMENU: return SDL_SCANCODE_LALT;
-    case VK_RMENU: return SDL_SCANCODE_RALT;      case 0xBA: return SDL_SCANCODE_SEMICOLON;   case 0xBB: return SDL_SCANCODE_EQUALS;
+    case 0x2E: return SDL_SCANCODE_DELETE;        case VK_SHIFT: return SDL_SCANCODE_LSHIFT;  case VK_LSHIFT: return SDL_SCANCODE_LSHIFT; case VK_RSHIFT: return SDL_SCANCODE_RSHIFT;
+    case VK_CONTROL: return SDL_SCANCODE_LCTRL;   case VK_LCONTROL: return SDL_SCANCODE_LCTRL; case VK_RCONTROL: return SDL_SCANCODE_RCTRL;
+    case VK_MENU: return SDL_SCANCODE_LALT;       case VK_LMENU: return SDL_SCANCODE_LALT;    case VK_RMENU: return SDL_SCANCODE_RALT;
+    case 0x14: return SDL_SCANCODE_CAPSLOCK;      case 0xBA: return SDL_SCANCODE_SEMICOLON;   case 0xBB: return SDL_SCANCODE_EQUALS;
     case 0xBC: return SDL_SCANCODE_COMMA;         case 0xBD: return SDL_SCANCODE_MINUS;       case 0xBE: return SDL_SCANCODE_PERIOD;
     case 0xBF: return SDL_SCANCODE_SLASH;         case 0xC0: return SDL_SCANCODE_GRAVE;       case 0xDB: return SDL_SCANCODE_LEFTBRACKET;
     case 0xDC: return SDL_SCANCODE_BACKSLASH;     case 0xDD: return SDL_SCANCODE_RIGHTBRACKET; case 0xDE: return SDL_SCANCODE_APOSTROPHE;
@@ -986,6 +1002,14 @@ int display_interval(void) { return (int)g_interval; }
 /* [Recomps#1] the interval the pacing uses: above 60 fps the lifted frame-rate patch asks for 0 (do not wait) at every
  * present; when display.c paces at frame_rate (g_pace_hz > 60) that is one of its ticks */
 static LONG64 eff_interval(void) { LONG iv = g_interval; return iv ? iv : g_pace_hz > 60 ? 1 : 0; }
+static LONG64 next_due_tick(LONG64 prev, LONG64 iv) {
+    if (g_pace_hz == 60 || iv <= 1) return prev + iv;
+    LONG64 hz = iv == 2 ? (g_pace_hz > 60 ? 60 : 30) : 60 / iv;
+    if (hz < 1) hz = 1;
+    if (hz >= g_pace_hz) return prev + 1;
+    LONG64 c = prev * hz / g_pace_hz + 1;
+    return (c * g_pace_hz + hz - 1) / hz;
+}
 void nvn_pf_pace(LONG64 ticks);            /* nvn_gl.c: timing scopes */
 /* MR_CLOCKSTAT=1: per 600 presented frames, the real time, the vsync signals sent, the refreshes the game counted
  * (600 = one step per presented frame) and the refreshes this thread slept through. */
@@ -1028,9 +1052,9 @@ static void frame_queued(void) {
         LONG64 held = InterlockedExchange64(&g_hold_ticks, 0);
         if (held) nvn_pf_pace(held);                               /* the hold of the finished frame is pacing time (it replaces the wait after the present) */
     } else {
-    LONG64 at = g_vsync_n + 1, iv = eff_interval();
+    LONG64 at = g_vsync_n + 1, iv = eff_interval(), due = next_due_tick(g_latch, iv);
     if (!iv) at = g_vsync_n;                                       /* interval 0: shown at once, nobody waits */
-    else if (at < g_latch + iv) at = g_latch + iv;
+    else if (at < due) at = due;
     g_latch = at;
     InterlockedExchange(&g_latch_pending, iv != 0);
     }
@@ -1046,8 +1070,10 @@ static void frame_queued(void) {
         if (g_lockstep) printf("speed: frame %lld, %lld frames presented in the last %.2f s (%.1f per second)%c", (long long)n, (long long)second_frames,
                                (double)(now.QuadPart - second_start.QuadPart) / (double)g_freq.QuadPart, (double)second_frames * (double)g_freq.QuadPart / (double)(now.QuadPart - second_start.QuadPart), 10);
         if (gfx_options()->overlay && second_frames) {       /* track O: frame_time_overlay = on */
+            void pcmenu_perf(int fps, double ms);
             double ms = (double)(now.QuadPart - second_start.QuadPart) * 1000.0 / (double)g_freq.QuadPart / (double)second_frames;
             printf("frame-time: %.2f ms per frame over the last second (%lld frames)\n", ms, (long long)second_frames);
+            pcmenu_perf((int)second_frames, ms);
             snprintf(title, sizeof title, "%s - frame %lld - %lld fps - %.2f ms per frame", g_title, (long long)n, (long long)second_frames, ms);
         } else
         snprintf(title, sizeof title, "%s - frame %lld - %lld fps", g_title, (long long)n, (long long)second_frames);
@@ -1255,17 +1281,17 @@ static void l1_report(FILE *out) {
 void display_present_plan(int vulkan) {
     if (!vulkan || old_pacing()) return;
     pace_options();
-    LONG64 now_n = g_vsync_n, iv = eff_interval(), prev = g_latch, at = now_n + 1;
-    int on_time = iv && now_n < prev + iv && prev + iv - now_n <= 6;
+    LONG64 now_n = g_vsync_n, iv = eff_interval(), prev = g_latch, due = next_due_tick(prev, iv), at = now_n + 1;
+    int on_time = iv && now_n < due && due - now_n <= 6;
     static int late_go = -1;
     if (late_go < 0) late_go = !(getenv("MR_PACE_LATE") && !atoi(getenv("MR_PACE_LATE")));
     if (!iv) at = now_n;
-    else if (at < prev + iv) at = prev + iv;
-    else if (late_go && now_n >= prev + iv) at = now_n;      /* issue 257: a late frame does not wait for one more tick (see the comment above) */
+    else if (at < due) at = due;
+    else if (late_go && now_n >= due) at = now_n;      /* issue 257: a late frame does not wait for one more tick (see the comment above) */
     g_latch = at;
     InterlockedExchange(&g_latch_pending, iv != 0);
     if (iv && !on_time) g_hold_late++;
-    l1_plan(iv && !on_time && now_n > prev + iv);      /* L1 (a frame queued after the tick it was due at = late) */
+    l1_plan(iv && !on_time && now_n > due);      /* L1 (a frame queued after the tick it was due at = late) */
     InterlockedExchange64(&g_hold_target, on_time && g_hold_on && !g_lockstep ? at : 0);
     InterlockedExchange(&g_planned, 1);
 }
@@ -1289,6 +1315,7 @@ int display_present_defer(void) {
 }
 /* Render thread, after it has stored the kept present: 1 = the tick came meanwhile, present now. (The vsync thread looks
  * at g_defer_target AFTER it has published the tick, this looks at the tick AFTER the target is set: one of the two sees it.) */
+double display_refresh_hz(void) { return g_vb_state == 2 && g_vb_period > 0 ? (double)g_freq.QuadPart / g_vb_period : 0.0; }      /* [moonriver] nvn_vk_fg.c: the display's measured rate, 0 = not known */
 int display_present_due(void) { LONG64 t = g_defer_target; return t && g_vsync_n >= t; }
 void display_present_flushed(void) { InterlockedExchange64(&g_defer_target, 0); }
 /* Render thread, right after vkQueuePresentKHR returned: what the screen gets (see the comment at the top). */
@@ -1448,20 +1475,23 @@ void display_pace(void) {
     if (!g_interval) next = now;
     else if (left > 0) {
         static HANDLE timer;
-        LARGE_INTEGER after, due;
+        LARGE_INTEGER after;
         hitch_pacing(1);
         if (!timer) timer = CreateWaitableTimerExW(NULL, NULL, 0x00000002 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */, TIMER_ALL_ACCESS);
-        due.QuadPart = -((left - g_freq.QuadPart / 2000) * 10000000 / g_freq.QuadPart);          /* relative, 100 ns units */
-        if (due.QuadPart < 0) { if (timer && SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE)) WaitForSingleObject(timer, 100); else Sleep((DWORD)(left * 1000 / g_freq.QuadPart)); }
-        for (QueryPerformanceCounter(&after); after.QuadPart < next.QuadPart; QueryPerformanceCounter(&after)) YieldProcessor();
+        precise_wait_until(next.QuadPart, timer);
+        QueryPerformanceCounter(&after);
         hitch_pacing(0);
         nvn_pf_pace(after.QuadPart - now.QuadPart);
     } else if (-left > frame_ticks) next.QuadPart = now.QuadPart - frame_ticks;
     if ((now.QuadPart - second_start.QuadPart) >= g_freq.QuadPart) {
         char title[160];
-        if (gfx_options()->overlay && second_frames) printf("frame-time: %.2f ms per frame over the last second (%lld frames)\n", (double)(now.QuadPart - second_start.QuadPart) * 1000.0 / (double)g_freq.QuadPart / (double)second_frames, (long long)second_frames);
-        if (gfx_options()->overlay && second_frames) snprintf(title, sizeof title, "%s - frame %lld - %lld fps - %.2f ms per frame", g_title, (long long)n, (long long)second_frames, (double)(now.QuadPart - second_start.QuadPart) * 1000.0 / (double)g_freq.QuadPart / (double)second_frames);
-        else
+        if (gfx_options()->overlay && second_frames) {
+            void pcmenu_perf(int fps, double ms);
+            double ms = (double)(now.QuadPart - second_start.QuadPart) * 1000.0 / (double)g_freq.QuadPart / (double)second_frames;
+            pcmenu_perf((int)second_frames, ms);
+            printf("frame-time: %.2f ms per frame over the last second (%lld frames)\n", ms, (long long)second_frames);
+            snprintf(title, sizeof title, "%s - frame %lld - %lld fps - %.2f ms per frame", g_title, (long long)n, (long long)second_frames, ms);
+        } else
         snprintf(title, sizeof title, "%s - frame %lld - %lld fps", g_title, (long long)n, (long long)second_frames);
         SetWindowTextA(g_hwnd, title);
         second_frames = 0;
