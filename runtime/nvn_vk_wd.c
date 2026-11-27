@@ -401,12 +401,7 @@ static void wd_start(void) {
  * (found with it: why MR_RENDERER=gl stood still at its start). The Vulkan fields of the report are zero under OpenGL. */
 static DWORD WINAPI wd_once(void *a) {
     Sleep((DWORD)(uintptr_t)a * 1000);
-#ifdef _WIN32
     wd_dump(0, 0);
-#else
-    void host_dump_stacks(void);                    /* [moonriver] hostrt.c: every thread's guest stack (the report's thread list is Windows only) */
-    host_dump_stacks();
-#endif
     return 0;
 }
 static DWORD WINAPI wd_exit_at(void *a) {            /* [moonriver] TEST ONLY: MR_EXIT_AT=<seconds>: the end-of-run report, then exit (an app can't be closed from adb) */
