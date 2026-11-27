@@ -28,9 +28,16 @@ int  nnpad_get(int player, NnPadState *out);     /* 0 = none */
 void nnpad_rumble(int player, float low, float high);   /* amplitudes 0..1 of the low and high band */
 void nnpad_disconnect(int player);               /* DisconnectNpad: hidden until one of its buttons is pressed */
 int  nnpad_mouse_cfg(float *sens, int *invert);  /* [Recomps#1] mouse_camera on? (+ sensitivity, invert-y) */
+int  nnpad_mouse_cam_set(const char *val);       /* [moonriver] [keyboard] mouse_camera: on / off */
+int  nnpad_mouse_sens_set(const char *val);      /* [moonriver] [keyboard] mouse_sensitivity: e.g. "1.0" */
+int  nnpad_mouse_inv_set(const char *val);       /* [moonriver] [keyboard] mouse_invert_y: on / off */
 int  nnpad_keyboard_player(void);                /* 0..7, -1 = nobody; fixed once resolved (see controllers.ini) */
 #define KB_N 25
 int  nnpad_kb_vk(int idx);                       /* configured virtual key: 0..15 = Pro buttons, 16..19 = left stick left/up/right/down, 20..23 = right stick, 24 = walk; 0 = unbound */
+int  nnpad_kb_default_vk(int idx);               /* [moonriver] built-in default packed primary | (secondary << 8) for slot idx */
+int  nnpad_kb_set(int idx, int vk_packed);       /* [moonriver] writes [keyboard] key to controllers.ini (vk1 | vk2 << 8; 0 = none) */
+int  nnpad_kb_reset(void);                       /* [moonriver] resets all [keyboard] keys and mouse camera settings to defaults */
+int  nnpad_kb_is_default(void);                  /* [moonriver] 1 when [keyboard] bindings & mouse settings match built-in defaults */
 int  nnpad_key_vk(const char *name);             /* one key name of controllers.ini (W, SPACE, LSHIFT, MOUSE1, ...) -> virtual key, 0 = unknown */
 int  nnpad_tool(int argc, char **argv);          /* --pad-test / --pad-map <n> / MR_PAD_TEST: returns the exit code, or -1 if this is no tool request */
 

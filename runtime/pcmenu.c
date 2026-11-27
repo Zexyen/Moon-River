@@ -52,6 +52,7 @@ extern volatile LONG g_guest_frozen;                       /* hostrt.c */
 extern volatile LONG g_display_close;                      /* display.c: the window is being closed (the game must run to exit) */
 void nnhid_menu_read(uint64_t *buttons, int *lx, int *ly, int swap_ab);       /* nnhid.c */
 int nnhid_menu_key(int vk);
+int nnhid_menu_any_vk(void);
 uint32_t nnhid_menu_pad(void);
 int nvn_front_post_pcmenu(void);                           /* nvn_gl.c: 0 = not the Vulkan renderer */
 int nvn_vk_hdr_on(void);                                   /* nvn_vk.c: the picture goes out as HDR now */
@@ -59,7 +60,11 @@ void display_vsync_apply(void);                            /* display.c */
 int display_window_apply(void);
 void display_quit(void);
 void display_mouse_want(int on);
+int display_mouse_wheel_take(void);
 int nnpad_mouse_cfg(float *sens, int *invert);             /* nnpad_sdl.c */
+int nnpad_mouse_cam_set(const char *val);
+int nnpad_mouse_sens_set(const char *val);
+int nnpad_mouse_inv_set(const char *val);
 const char *nnpad_prompts_setting(void);
 int nnpad_prompts_set(const char *val);
 const char *nnpad_menu_swap_setting(void);
@@ -71,19 +76,30 @@ int nnpad_button_prompts(void);
 int nnpad_prompts_by_letter(void);
 int nnpad_bind_get(unsigned char *out);
 int nnpad_bind_set(const unsigned char *b);
+int nnpad_kb_vk(int idx);
+int nnpad_kb_default_vk(int idx);
+int nnpad_kb_set(int idx, int vk_packed);
+int nnpad_kb_reset(void);
+int nnpad_kb_is_default(void);
 int prompts_control_type(void);
 
-/* A_PROMPTS, A_MENU_SWAP, A_LAYOUT: keys of controllers.ini. A_PAGE: opens Controls page.
- * A_QUIT: ends the game. A_PRESET / A_BIND: page 1 (Controls) rows. */
-enum { A_LIVE, A_VSYNC, A_WINDOW, A_SIZE, A_SCALE, A_RESTART, A_PROMPTS, A_MENU_SWAP, A_LAYOUT, A_PAGE, A_QUIT, A_PRESET, A_BIND };
+/* A_PROMPTS, A_MENU_SWAP, A_LAYOUT: keys of controllers.ini. A_PAGE: opens subpage (slot 1 = Controller, 2 = Keyboard & Mouse).
+ * A_QUIT: ends the game. A_PRESET / A_BIND: page 1 (Controller). A_KB_RESET..A_KB: page 2 (Keyboard & Mouse). */
+enum {
+    A_LIVE, A_VSYNC, A_WINDOW, A_SIZE, A_SCALE, A_RESTART, A_PROMPTS, A_MENU_SWAP, A_LAYOUT, A_PAGE, A_QUIT,
+    A_PRESET, A_BIND,
+    A_KB_RESET, A_MOUSE_CAM, A_MOUSE_SENS, A_MOUSE_INV, A_KB
+};
 #define ROW_VALUES 16
 typedef struct {
     const char *key, *label, *help, *env, *dflt;           /* dflt: the reader's value when the key is not in the file */
     int apply, optional;
     const char *val[ROW_VALUES], *name[ROW_VALUES];
-    int slot;                                              /* A_BIND: Type A logical Pro button index 0..15 */
+    int slot;                                              /* A_PAGE: page id; A_BIND: Pro button 0..15; A_KB: [keyboard] slot 0..24 */
 } Row;
 #define BIND(key, label, slot) {key, label, "Press A / Enter, then press the controller button to assign (swaps if already used). Left / right also cycles buttons.", NULL, NULL, A_BIND, 0, {0}, {0}, slot}
+#define KB(key, label, slot) {key, label, "Click or press Enter to bind a key or mouse button (swaps if already used). Left / right switches primary & secondary; Del clears.", NULL, NULL, A_KB, 0, {0}, {0}, slot}
+#define KB_M(key, label, slot, help) {key, label, help, NULL, NULL, A_KB, 0, {0}, {0}, slot}
 static const Row k_rows[] = {
     {"window", "Display mode", "Windowed: a window of the size below. Borderless and fullscreen cover the monitor the window is on.", NULL, "windowed", A_WINDOW, 0,
      {"windowed", "borderless", "fullscreen"}, {"Windowed", "Borderless", "Fullscreen"}, 0},
@@ -130,11 +146,13 @@ static const Row k_rows[] = {
      {"off", "on"}, {"Off", "On"}, 0},
     {"layout", "Face buttons", "Position: the right button acts as A, as on a Switch. Printed letter: the button marked A, Cross as A on PlayStation pads. Prompts follow.", NULL, "auto", A_LAYOUT, 0,
      {"auto", "positional", "labels"}, {"Auto", "Position", "Printed letter"}, 0},
-    {"controls", "Controls", "Rebind every button of gameplay for controllers. Menus keep their own buttons, and the game's prompts follow yours.", NULL, "open", A_PAGE, 0,
-     {"open"}, {"Open"}, 0},
+    {"controls", "Controller controls", "Rebind every button of gameplay for controllers. Menus keep their own buttons, and the game's prompts follow yours.", NULL, "open", A_PAGE, 0,
+     {"open"}, {"Open"}, 1},
+    {"kb_controls", "Keyboard & mouse", "Rebind keyboard keys and mouse buttons (primary & secondary slots), and adjust mouse camera settings. Prompts update live.", NULL, "open", A_PAGE, 0,
+     {"open"}, {"Open"}, 2},
     {"quit", "Quit to desktop", "Ends the game, as closing its window does. Progress since the last save is lost. Press again to confirm.", NULL, "quit", A_QUIT, 0,
      {"quit"}, {"Quit"}, 0},
-    /* ---- Page 1: Controls ---- */
+    /* ---- Page 1: Controller controls ---- */
     {"bind_preset", "Preset", "Bayonetta 2's four built-in control types as a starting point. Game's setting uses the save's own Control Type (A-D).", NULL, "game", A_PRESET, 0,
      {"game", "a", "b", "c", "d"}, {"Game's setting", "Type A", "Type B", "Type C", "Type D"}, 0},
     BIND("bind_punch",  "Punch",            RB_X),
@@ -153,6 +171,41 @@ static const Row k_rows[] = {
     BIND("bind_ddown",  "Item (Down)",      RB_DOWN),
     BIND("bind_sub",    "Subscreen",        RB_MINUS),
     BIND("bind_pause",  "Pause",            RB_PLUS),
+    /* ---- Page 2: Keyboard & mouse ---- */
+    {"kb_reset", "Reset to defaults", "Restores all keyboard keys, mouse buttons and mouse camera settings to defaults. Press again to confirm.", NULL, "reset", A_KB_RESET, 0,
+     {"reset"}, {"Reset"}, 0},
+    {"mouse_camera", "Mouse camera", "Move the camera with the mouse while the game window is active. Esc or Alt+Tab releases the cursor.", NULL, "on", A_MOUSE_CAM, 0,
+     {"off", "on"}, {"Off", "On"}, 0},
+    {"mouse_sensitivity", "Mouse sensitivity", "How fast moving the mouse turns the camera. 1.0\xC3\x97 reaches full turn speed at 1200 counts a second.", NULL, "1.0", A_MOUSE_SENS, 0,
+     {"0.25", "0.5", "0.75", "1.0", "1.25", "1.5", "2.0", "2.5", "3.0"},
+     {"0.25\xC3\x97", "0.5\xC3\x97", "0.75\xC3\x97", "1.0\xC3\x97", "1.25\xC3\x97", "1.5\xC3\x97", "2.0\xC3\x97", "2.5\xC3\x97", "3.0\xC3\x97"}, 0},
+    {"mouse_invert_y", "Invert mouse Y", "Invert vertical mouse camera look (moving the mouse up tilts the camera down).", NULL, "off", A_MOUSE_INV, 0,
+     {"off", "on"}, {"Off", "On"}, 0},
+    KB("kb_punch",   "Punch",            RB_X),
+    KB_M("kb_kick",  "Kick / Confirm",   RB_A, "Primary key shows in prompts; keep a secondary key like Enter for confirming in menus. Left / right switches slots; Del clears."),
+    KB_M("kb_jump",  "Jump / Back",      RB_B, "Primary key shows in prompts; keep a secondary key like Backspace for going back in menus. Left / right switches slots; Del clears."),
+    KB("kb_shoot",   "Shoot",            RB_Y),
+    KB("kb_dodge",   "Dodge",            RB_ZR),
+    KB("kb_lock",    "Lock-On",          RB_R),
+    KB("kb_weapon",  "Weapon Set",       RB_ZL),
+    KB("kb_climax",  "Umbran Climax",    RB_L),
+    KB("kb_cam",     "Reset Camera",     RB_STICK_R),
+    KB("kb_l3",      "Left Stick Press", RB_STICK_L),
+    KB_M("kb_dleft", "Item / Menu Left",  RB_LEFT,  "D-pad left for items and menu navigation. Primary shows in prompts; secondary keeps an alternate key (e.g. 1). Del clears."),
+    KB_M("kb_dup",   "Item / Menu Up",    RB_UP,    "D-pad up for items and menu navigation. Primary shows in prompts; secondary keeps an alternate key (e.g. 2). Del clears."),
+    KB_M("kb_dright","Item / Menu Right", RB_RIGHT, "D-pad right for items and menu navigation. Primary shows in prompts; secondary keeps an alternate key (e.g. 3). Del clears."),
+    KB_M("kb_ddown", "Item / Menu Down",  RB_DOWN,  "D-pad down for items / taunt and menu navigation. Primary shows in prompts; secondary keeps an alternate key (e.g. T). Del clears."),
+    KB("kb_sub",     "Subscreen",        RB_MINUS),
+    KB("kb_pause",   "Pause",            RB_PLUS),
+    KB("kb_move_u",  "Move Up",          17),
+    KB("kb_move_d",  "Move Down",        19),
+    KB("kb_move_l",  "Move Left",        16),
+    KB("kb_move_r",  "Move Right",       18),
+    KB("kb_walk",    "Walk",             24),
+    KB("kb_cam_u",   "Camera Up",        21),
+    KB("kb_cam_d",   "Camera Down",      23),
+    KB("kb_cam_l",   "Camera Left",      20),
+    KB("kb_cam_r",   "Camera Right",     22),
 };
 #define NROW ((int)(sizeof k_rows / sizeof k_rows[0]))
 
@@ -168,16 +221,19 @@ static unsigned g_ver;
 static int g_env_cut, g_env_set[NROW];
 static int g_swap, g_quit_ask;                                         /* swap_confirm as this opening of the panel began; Quit confirm */
 static int g_fam, g_letter;                                /* the button names of the hints */
-static int g_page, g_cap = -1, g_cap_armed;                /* 1 = Controls page; g_cap = row waiting for a pad button */
+static int g_page, g_cap = -1, g_cap_armed, g_cap_col, g_cap_cool; /* page 0=main, 1=Controller, 2=KB/Mouse; capture state */
 static ULONGLONG g_cap_t;
-static uint8_t g_b[16], g_b_start[16];                     /* Controls layout shown & snapshot when opened */
+static uint8_t g_b[16], g_b_start[16];                     /* Controller layout shown & snapshot when opened */
 static int g_b_on, g_b_start_on;
+static int g_kb[25], g_kb_start[25], g_kb_col, g_kb_reset_ask, g_kb_custom, g_scroll;
+#define PCM_KB_VIS 14                                      /* visible rows at once in the scrollable Keyboard & Mouse list */
 /* the environment as the program started (gfx_options sets MR_CUTSCENE_FPS itself, later) */
 __attribute__((constructor)) static void pcmenu_env(void) {
     for (int i = 0; i < NROW; i++) g_env_set[i] = k_rows[i].env && getenv(k_rows[i].env) != NULL;
 }
-static int row_on(int i) { return g_shown[i] && g_page == (k_rows[i].apply >= A_PRESET) && (strncmp(k_rows[i].key, "hdr_", 4) || nvn_vk_hdr_on()); }      /* HDR's two brightness rows: while the picture goes out as HDR */
-static int row_count(int i) { if (k_rows[i].apply == A_BIND) return 16; int n = 0; while (n < ROW_VALUES && k_rows[i].val[n]) n++; return n; }
+static int row_page(int i) { int a = k_rows[i].apply; return a >= A_KB_RESET ? 2 : a >= A_PRESET ? 1 : 0; }
+static int row_on(int i) { return g_shown[i] && g_page == row_page(i) && (strncmp(k_rows[i].key, "hdr_", 4) || nvn_vk_hdr_on()); }      /* HDR's two brightness rows: while the picture goes out as HDR */
+static int row_count(int i) { if (k_rows[i].apply == A_BIND) return 16; if (k_rows[i].apply == A_KB) return 2; int n = 0; while (n < ROW_VALUES && k_rows[i].val[n]) n++; return n; }
 static int find_val(int i, const char *v) {
     for (int k = 0; k < row_count(i); k++) {
         if (!_stricmp(k_rows[i].val[k], v)) return k;
@@ -206,19 +262,64 @@ static void binds_sync(void) {
         }
     }
 }
+static void kb_sync(int snapshot) {
+    float sens = 1.0f; int inv = 0;
+    int cam = nnpad_mouse_cfg(&sens, &inv);
+    char sbuf[32];
+    snprintf(sbuf, sizeof sbuf, "%.4g", sens);
+    for (int k = 0; k < 25; k++) {
+        g_kb[k] = nnpad_kb_vk(k);
+        if (snapshot) g_kb_start[k] = g_kb[k];
+    }
+    g_kb_custom = !nnpad_kb_is_default();
+    for (int i = 0; i < NROW; i++) {
+        int a = k_rows[i].apply;
+        if (a == A_KB) {
+            g_cur[i] = g_kb[k_rows[i].slot];
+            if (snapshot) g_start[i] = g_kb_start[k_rows[i].slot];
+        } else if (a == A_MOUSE_CAM) {
+            g_cur[i] = cam ? 1 : 0;
+            if (snapshot) g_start[i] = g_cur[i];
+        } else if (a == A_MOUSE_INV) {
+            g_cur[i] = inv ? 1 : 0;
+            if (snapshot) g_start[i] = g_cur[i];
+        } else if (a == A_MOUSE_SENS) {
+            if ((g_cur[i] = find_val(i, sbuf)) < 0) snprintf(g_raw[i], sizeof g_raw[i], "%s\xC3\x97", sbuf);
+            if (snapshot) g_start[i] = g_cur[i];
+        }
+    }
+}
 static void binds_load(void) {
     g_b_on = nnpad_bind_get(g_b) && rb_valid(g_b);
     if (!g_b_on) rb_preset(prompts_control_type(), g_b);
     memcpy(g_b_start, g_b, 16);
     g_b_start_on = g_b_on;
     binds_sync();
+    kb_sync(1);
 }
-static void page_go(int page, int focus_controls) {
+static void scroll_ensure(int max_vis) {
+    int nshow = 0, sel_idx = 0;
+    for (int i = 0; i < NROW; i++) {
+        if (!row_on(i)) continue;
+        if (i == g_sel) sel_idx = nshow;
+        nshow++;
+    }
+    if (nshow <= max_vis) { g_scroll = 0; return; }
+    if (sel_idx < g_scroll) g_scroll = sel_idx;
+    if (sel_idx >= g_scroll + max_vis) g_scroll = sel_idx - max_vis + 1;
+    if (g_scroll < 0) g_scroll = 0;
+    if (g_scroll > nshow - max_vis) g_scroll = nshow - max_vis;
+}
+static void page_go(int page, int focus_page) {
     g_page = page;
     g_cap = -1;
+    g_cap_cool = 0;
     g_quit_ask = 0;
-    if (page == 0 && focus_controls) {
-        for (int i = 0; i < NROW; i++) if (k_rows[i].apply == A_PAGE && row_on(i)) { g_sel = i; return; }
+    g_kb_reset_ask = 0;
+    g_kb_col = 0;
+    g_scroll = 0;
+    if (page == 0 && focus_page > 0) {
+        for (int i = 0; i < NROW; i++) if (k_rows[i].apply == A_PAGE && k_rows[i].slot == focus_page && row_on(i)) { g_sel = i; return; }
     }
     g_sel = 0;
     while (g_sel < NROW - 1 && !row_on(g_sel)) g_sel++;
@@ -228,7 +329,9 @@ static void menu_init(void) {                              /* the first opening:
     char v[64];
     for (int i = 0; i < NROW; i++) {
         const Row *r = &k_rows[i];
-        if (r->apply == A_BIND) { g_shown[i] = 1; g_lock_why[i] = 0; continue; }
+        if (r->apply == A_BIND || r->apply == A_KB || r->apply == A_KB_RESET || r->apply == A_MOUSE_CAM || r->apply == A_MOUSE_SENS || r->apply == A_MOUSE_INV) {
+            g_shown[i] = 1; g_lock_why[i] = 0; continue;
+        }
         int have = r->apply == A_SIZE || r->apply == A_PROMPTS || r->apply == A_MENU_SWAP || r->apply == A_LAYOUT || r->apply == A_PAGE || r->apply == A_QUIT || r->apply == A_PRESET || gfx_ini_get(r->key, v, sizeof v);
         if (r->apply == A_WINDOW) { static const char *const w[3] = {"windowed", "borderless", "fullscreen"}; snprintf(v, sizeof v, "%s", w[o->window_mode]); have = 1; }      /* [moonriver] what runs: Big Picture's borderless included (gfx_options.c) */
         else if (r->apply == A_SIZE) snprintf(v, sizeof v, "%dx%d", o->width, o->height);      /* MR_WINDOW included */
@@ -290,6 +393,7 @@ static void layer_blend(int x, int y, float b, float g, float r, float a) {   /*
 }
 static unsigned g_drawn_ver = ~0u, g_gen;
 static int g_row_y[NROW], g_row_h, g_row_x0[NROW], g_row_x1[NROW], g_val_x0[NROW], g_val_x1[NROW], g_close_r[4];
+static int g_pill_x0[NROW][2], g_pill_x1[NROW][2];         /* Page 2 (Keyboard & Mouse): Primary [0] & Secondary [1] pill bounds */
 typedef struct { uint8_t b, g, r; } Rgb;                   /* BGRA byte order */
 static const Rgb C_SKY0      = { 23,   8,   3},            /* #030817 */
                  C_SKY1      = { 51,  20,   7},            /* #071433 */
@@ -833,20 +937,76 @@ static const char *pad_name(int b) {
     if (b >= 6 && b <= 11) return (g_fam == 3 ? xb : ps)[b - 6];
     return sw[b];
 }
+static const char *kb_vk_label(int vk, char *out, size_t cap) {
+    vk &= 0xff;
+    if (!vk) { snprintf(out, cap, "\xE2\x80\x94"); return out; }
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) { snprintf(out, cap, "%c", vk); return out; }
+    switch (vk) {
+    case VK_LBUTTON:  snprintf(out, cap, "Mouse 1"); return out;
+    case VK_RBUTTON:  snprintf(out, cap, "Mouse 2"); return out;
+    case VK_MBUTTON:  snprintf(out, cap, "Mouse 3"); return out;
+    case VK_XBUTTON1: snprintf(out, cap, "Mouse 4"); return out;
+    case VK_XBUTTON2: snprintf(out, cap, "Mouse 5"); return out;
+    case VK_LEFT:     snprintf(out, cap, "Left"); return out;
+    case VK_UP:       snprintf(out, cap, "Up"); return out;
+    case VK_RIGHT:    snprintf(out, cap, "Right"); return out;
+    case VK_DOWN:     snprintf(out, cap, "Down"); return out;
+    case VK_RETURN:   snprintf(out, cap, "Enter"); return out;
+    case VK_BACK:     snprintf(out, cap, "Backspace"); return out;
+    case VK_SPACE:    snprintf(out, cap, "Space"); return out;
+    case VK_TAB:      snprintf(out, cap, "Tab"); return out;
+    case VK_ESCAPE:   snprintf(out, cap, "Esc"); return out;
+    case VK_SHIFT:    snprintf(out, cap, "Shift"); return out;
+    case VK_CONTROL:  snprintf(out, cap, "Ctrl"); return out;
+    case VK_MENU:     snprintf(out, cap, "Alt"); return out;
+    case VK_LSHIFT:   snprintf(out, cap, "LShift"); return out;
+    case VK_RSHIFT:   snprintf(out, cap, "RShift"); return out;
+    case VK_LCONTROL: snprintf(out, cap, "LCtrl"); return out;
+    case VK_RCONTROL: snprintf(out, cap, "RCtrl"); return out;
+    case VK_LMENU:    snprintf(out, cap, "LAlt"); return out;
+    case VK_RMENU:    snprintf(out, cap, "RAlt"); return out;
+    case 0x21:        snprintf(out, cap, "PgUp"); return out;
+    case 0x22:        snprintf(out, cap, "PgDn"); return out;
+    case 0x23:        snprintf(out, cap, "End"); return out;
+    case 0x24:        snprintf(out, cap, "Home"); return out;
+    case 0x2D:        snprintf(out, cap, "Ins"); return out;
+    case 0x2E:        snprintf(out, cap, "Del"); return out;
+    case 0xBA:        snprintf(out, cap, ";"); return out;
+    case 0xBB:        snprintf(out, cap, "="); return out;
+    case 0xBC:        snprintf(out, cap, ","); return out;
+    case 0xBD:        snprintf(out, cap, "-"); return out;
+    case 0xBE:        snprintf(out, cap, "."); return out;
+    case 0xBF:        snprintf(out, cap, "/"); return out;
+    case 0xC0:        snprintf(out, cap, "`"); return out;
+    case 0xDB:        snprintf(out, cap, "["); return out;
+    case 0xDC:        snprintf(out, cap, "\\"); return out;
+    case 0xDD:        snprintf(out, cap, "]"); return out;
+    case 0xDE:        snprintf(out, cap, "'"); return out;
+    default:
+        if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD0 + 9) { snprintf(out, cap, "Num %d", vk - VK_NUMPAD0); return out; }
+        if (vk >= VK_F1 && vk <= VK_F1 + 11) { snprintf(out, cap, "F%d", vk - VK_F1 + 1); return out; }
+        snprintf(out, cap, "0x%02X", vk);
+        return out;
+    }
+}
 static const char *val_name(int i) {
-    if (i == g_cap) return "Press a button\xE2\x80\xA6";
+    if (i == g_cap) return k_rows[i].apply == A_KB ? "Press key\xE2\x80\xA6" : "Press a button\xE2\x80\xA6";
     if (k_rows[i].apply == A_BIND) return pad_name(g_cur[i] >= 0 && g_cur[i] < 16 ? g_cur[i] : 0);
     if (k_rows[i].apply == A_PRESET && g_cur[i] == 0) {
         static const char *const gn[4] = {"Game (Type A)", "Game (Type B)", "Game (Type C)", "Game (Type D)"};
         int ct = prompts_control_type();
         return gn[ct >= 0 && ct < 4 ? ct : 0];
     }
-    if (k_rows[i].apply == A_PAGE) return g_b_on ? "Custom  \xE2\x80\xBA" : "Open  \xE2\x80\xBA";
+    if (k_rows[i].apply == A_PAGE) {
+        int custom = k_rows[i].slot == 1 ? g_b_on : g_kb_custom;
+        return custom ? "Custom  \xE2\x80\xBA" : "Open  \xE2\x80\xBA";
+    }
+    if (k_rows[i].apply == A_KB_RESET) return g_kb_reset_ask ? "Press again to reset" : "Reset";
     if (k_rows[i].apply == A_QUIT && g_quit_ask) return "Press again to quit";
     return g_cur[i] >= 0 ? k_rows[i].name[g_cur[i]] : g_raw[i];
 }
 static int row_restart(int i) {
-    if (k_rows[i].apply == A_PAGE || k_rows[i].apply == A_QUIT || k_rows[i].apply == A_PRESET || k_rows[i].apply == A_BIND) return 0;
+    if (k_rows[i].apply >= A_PAGE) return 0;
     if (g_cur[i] == g_start[i]) return 0;
     if (!strcmp(k_rows[i].key, "aspect")) return (g_cur[i] >= 0 && !strcmp(k_rows[i].val[g_cur[i]], "wide")) || (g_start[i] >= 0 && !strcmp(k_rows[i].val[g_start[i]], "wide"));
     return k_rows[i].apply == A_RESTART || (k_rows[i].apply == A_SCALE && g_open) || ((k_rows[i].apply == A_WINDOW || k_rows[i].apply == A_SIZE) && g_nowin);
@@ -1027,50 +1187,70 @@ static void draw_panel_words(int W, int H, float s) {
     for (int i = 0; i < NROW; i++) nshow += row_on(i);
     float pad = 42 * s, cx0 = edge + pad, cx1 = W - pad, cw = cx1 - cx0;
 
-    /* ---- Header breadcrumb (Moon River — PC Settings, or PC Settings — Controls) ---- */
-    float hy = g_page ? 20 * s : 28 * s, ic = (g_page ? 26 : 30) * s, cpx = (g_page ? 19 : 21) * s;
+    /* ---- Header breadcrumb (Moon River — PC Settings, PC Settings — Controller, or PC Settings — Keyboard & Mouse) ---- */
+    int compact = g_page || nshow > 16;
+    float hy = compact ? 20 * s : 28 * s, ic = (compact ? 26 : 30) * s, cpx = (compact ? 19 : 21) * s;
     int cbase = (int)(hy + ic * 0.5f + cpx * 0.34f);
     art32_blit(&g_icon, cx0, hy, ic, ic, 1.0f, 0, edge, 1);
     float hx = text(&g_f_head, cx0 + ic + 10 * s, cbase, g_page ? "PC Settings" : "Moon River", cpx, C_CRUMB, 0.4f * s) + 14 * s;
     rect((int)hx, (int)(hy + ic * 0.5f), (int)(22 * s), (int)(1.2f * s + 0.5f) ? (int)(1.2f * s + 0.5f) : 1, C_CYAN_MID, 0.9f);
     hx += 22 * s + 14 * s;
-    text_glow(&g_f_head, hx, cbase, g_page ? "Controls" : "PC Settings", cpx, C_ICE, C_CYAN, 4.5f * s, 0.55f, 0.4f * s);
+    const char *pg_title = g_page == 2 ? "Keyboard & Mouse" : g_page == 1 ? "Controller" : "PC Settings";
+    text_glow(&g_f_head, hx, cbase, pg_title, cpx, C_ICE, C_CYAN, 4.5f * s, 0.55f, 0.4f * s);
     const char *sub = !g_page ? "The game waits while this is open."
-                    : g_fam == 4 ? "Controller layout (keyboard keys are in [keyboard] of controllers.ini)."
-                                 : "Gameplay buttons for controllers. Menus keep their own.";
-    text(&g_f_ui, cx0 + 2 * s, (int)(hy + ic + (g_page ? 17 : 22) * s), sub, (g_page ? 13.5f : 14.5f) * s, C_MUTE, 0.3f * s);
+                    : g_page == 2 ? "Primary key shows in prompts; secondary keeps menu keys (Enter / Backspace / Arrows)."
+                                  : "Gameplay buttons for controllers. Menus keep their own.";
+    text(&g_f_ui, cx0 + 2 * s, (int)(hy + ic + (compact ? 17 : 22) * s), sub, (compact ? 13.5f : 14.5f) * s, C_MUTE, 0.3f * s);
 
     /* ---- Settings rows (aligned vertical Moon River list, matching launcher .rows / .rw) ---- */
     float band_y = H - 116 * s, foot_y = H - 58 * s;
-    float top = (g_page || nshow > 16) ? 76 * s : 96 * s;
-    float avail = (band_y - (g_page || nshow > 16 ? 22 : 34) * s) - top;
-    float rowh = nshow > 0 ? avail / nshow : 44 * s;
-    float maxh = g_page ? 34 * s : 44 * s, minh = (g_page || nshow > 16) ? 19 * s : 28 * s;
+    int max_vis = g_page == 2 ? PCM_KB_VIS : nshow;
+    if (g_page == 2) scroll_ensure(max_vis); else g_scroll = 0;
+    int vis_n = nshow < max_vis ? nshow : max_vis;
+    float top = g_page == 2 ? 94 * s : (g_page || nshow > 16) ? 76 * s : 96 * s;
+    float avail = (band_y - (g_page == 2 ? 24 : (g_page || nshow > 16) ? 22 : 34) * s) - top;
+    float rowh = vis_n > 0 ? avail / vis_n : 44 * s;
+    float maxh = g_page ? 34 * s : 44 * s, minh = g_page == 2 ? 24 * s : (g_page || nshow > 16) ? 19 * s : 28 * s;
     if (rowh > maxh) rowh = maxh;
     if (rowh < minh) rowh = minh;
     float rpx = rowh * (g_page ? 0.55f : 0.50f), vpx = rowh * (g_page ? 0.48f : 0.43f);
     if (rpx > (g_page ? 18.0f : 21.0f) * s) rpx = (g_page ? 18.0f : 21.0f) * s;
     if (vpx > (g_page ? 15.5f : 17.5f) * s) vpx = (g_page ? 15.5f : 17.5f) * s;
+    /* Page 2 column header strip above the rows (Action / Primary / Secondary) */
+    if (g_page == 2) {
+        float vx1 = cx1 - 12 * s, vx0 = vx1 - 312 * s, gap = 10 * s, pw0 = (vx1 - vx0 - gap) * 0.5f;
+        float hpx2 = 12.0f * s;
+        int hb = (int)(top - 7 * s);
+        text(&g_f_uib, cx0 + 16 * s, hb, "ACTION", hpx2, C_DIM, 0.8f * s);
+        float w1 = text_w(&g_f_uib, "PRIMARY", hpx2, 0.8f * s);
+        float w2 = text_w(&g_f_uib, "SECONDARY", hpx2, 0.8f * s);
+        text(&g_f_uib, vx0 + (pw0 - w1) * 0.5f, hb, "PRIMARY", hpx2, C_DIM, 0.8f * s);
+        text(&g_f_uib, vx0 + pw0 + gap + (pw0 - w2) * 0.5f, hb, "SECONDARY", hpx2, C_DIM, 0.8f * s);
+    }
     /* Top border hairline of the rows list (launcher .rows border-top: #6fe6ff38) */
     rect((int)cx0, (int)top, (int)cw, 1, C_CYAN, 0.24f);
     g_row_h = (int)rowh;
-    int y = (int)top + 1;
+    int y = (int)top + 1, vis_idx = 0;
     for (int i = 0; i < NROW; i++) {
         g_row_y[i] = -1;
+        g_pill_x0[i][0] = g_pill_x1[i][0] = g_pill_x0[i][1] = g_pill_x1[i][1] = -1;
         if (!row_on(i)) continue;
+        int idx = vis_idx++;
+        if (idx < g_scroll || idx >= g_scroll + max_vis) continue;
         g_row_y[i] = y;
         g_row_x0[i] = (int)cx0; g_row_x1[i] = (int)cx1;
-        float vx1 = cx1 - 12 * s, vx0 = vx1 - (g_page ? 248 : 260) * s;
-        int is_pill = k_rows[i].apply == A_QUIT || k_rows[i].apply == A_PAGE;
+        float vx1 = cx1 - 12 * s, vx0 = vx1 - (g_page == 2 ? 312 : g_page == 1 ? 248 : 260) * s;
+        int is_pill = k_rows[i].apply == A_QUIT || k_rows[i].apply == A_PAGE || k_rows[i].apply == A_KB_RESET;
+        int is_kb = k_rows[i].apply == A_KB;
         g_val_x0[i] = (int)(is_pill ? cx0 : vx0);
         g_val_x1[i] = (int)vx1;
         int sel = i == g_sel, base = y + (int)(rowh * 0.67f);
-        int is_quit_ask = k_rows[i].apply == A_QUIT && g_quit_ask;
+        int is_danger = (k_rows[i].apply == A_QUIT && g_quit_ask) || (k_rows[i].apply == A_KB_RESET && g_kb_reset_ask);
         int is_cap = i == g_cap;
         int changed = !is_pill && (g_cur[i] != g_start[i] || (k_rows[i].apply == A_PRESET && g_b_on != g_b_start_on));
         if (sel) {
-            /* Cyan wash gradient across the selected row (gold while waiting for a button press) */
-            Rgb accent = is_quit_ask ? C_ERR_DOT : is_cap ? C_GOLD : C_CYAN;
+            /* Cyan wash gradient across the selected row (gold while waiting for a button/key press) */
+            Rgb accent = is_danger ? C_ERR_DOT : is_cap ? C_GOLD : C_CYAN;
             hgrad_a((int)cx0, y, (int)cw, (int)rowh, accent, accent, 0.16f, 0.02f);
             /* Soft rightward bloom from the left accent bar */
             int bl = (int)(12 * s);
@@ -1085,45 +1265,91 @@ static void draw_panel_words(int W, int H, float s) {
             rect((int)cx0, y + (int)rowh - 1, (int)cw, 1, C_CYAN, 0.11f);
         }
         /* Row label in Marcellus (white with cyan glow when selected) */
-        Rgb tc = g_lock_why[i] ? C_DIM : is_quit_ask ? C_ERR : sel ? C_WHITE : C_INK;
-        if (sel && !g_lock_why[i]) text_glow(&g_f_head, cx0 + 16 * s, base, k_rows[i].label, rpx, tc, is_quit_ask ? C_ERR_DOT : is_cap ? C_GOLD : C_CYAN, 4.0f * s, 0.50f, 0.3f * s);
+        Rgb tc = g_lock_why[i] ? C_DIM : is_danger ? C_ERR : sel ? C_WHITE : C_INK;
+        if (sel && !g_lock_why[i]) text_glow(&g_f_head, cx0 + 16 * s, base, k_rows[i].label, rpx, tc, is_danger ? C_ERR_DOT : is_cap ? C_GOLD : C_CYAN, 4.0f * s, 0.50f, 0.3f * s);
         else text(&g_f_head, cx0 + 16 * s, base, k_rows[i].label, rpx, tc, 0.3f * s);
-        /* Value text & chevrons */
-        const char *v = val_name(i);
-        float vw = text_w(&g_f_uib, v, vpx, 0);
-        Rgb vc = g_lock_why[i] ? C_DIM : is_quit_ask ? C_ERR : is_cap ? C_GOLD : changed ? C_GOLD : (k_rows[i].apply == A_PAGE && g_b_on) ? C_GOLD : sel ? C_WHITE : C_ICE;
-        if (is_pill) {
-            /* Action / Subpage row: right-aligned subtle pill look without < > chevrons */
-            float bx = vx1 - vw - 22 * s, bw = vw + 22 * s, bh = rowh * 0.64f, by = y + (rowh - bh) * 0.5f;
-            Rgb bc = is_quit_ask ? C_ERR_DOT : sel ? C_CYAN : C_CYAN_MID;
-            rect((int)bx, (int)by, (int)bw, (int)bh, is_quit_ask ? C_ERR_DOT : C_SKY2, sel ? 0.32f : 0.20f);
-            rect((int)bx, (int)by, (int)bw, 1, bc, sel ? 0.85f : 0.45f);
-            rect((int)bx, (int)(by + bh - 1), (int)bw, 1, bc, sel ? 0.85f : 0.45f);
-            rect((int)bx, (int)by, 1, (int)bh, bc, sel ? 0.85f : 0.45f);
-            rect((int)(bx + bw - 1), (int)by, 1, (int)bh, bc, sel ? 0.85f : 0.45f);
-            text(&g_f_uib, bx + (bw - vw) * 0.5f, base - (int)(rowh * 0.02f), v, vpx, vc, 0);
-        } else {
-            text(&g_f_uib, (vx0 + vx1) * 0.5f - vw * 0.5f, base, v, vpx, vc, 0);
-            if (!g_lock_why[i] && !is_cap) {
-                float cva = sel ? 1.0f : 0.65f, cpx = vpx * 1.48f;
-                int cbase = base + (int)(vpx * 0.05f);
-                Rgb cvc = sel ? C_CYAN : C_CYAN_MID;
-                text_a(&g_f_ui, vx0, cbase, "\xE2\x80\xB9", cpx, cvc, 0, cva);
-                text_a(&g_f_ui, vx1 - text_w(&g_f_ui, "\xE2\x80\xBA", cpx, 0), cbase, "\xE2\x80\xBA", cpx, cvc, 0, cva);
+        /* Value text / dual key pills / chevrons */
+        if (is_kb) {
+            float gap = 10 * s, pw0 = (vx1 - vx0 - gap) * 0.5f, bh = rowh * 0.72f, by = y + (rowh - bh) * 0.5f;
+            int sl = k_rows[i].slot;
+            int vks[2] = { g_kb[sl] & 0xff, (g_kb[sl] >> 8) & 0xff };
+            int svks[2] = { g_kb_start[sl] & 0xff, (g_kb_start[sl] >> 8) & 0xff };
+            for (int c = 0; c < 2; c++) {
+                float bx = vx0 + c * (pw0 + gap);
+                g_pill_x0[i][c] = (int)bx; g_pill_x1[i][c] = (int)(bx + pw0);
+                int cap_c = is_cap && g_cap_col == c;
+                int foc_c = sel && g_kb_col == c;
+                int chg_c = vks[c] != svks[c];
+                char lbl[24];
+                if (cap_c) snprintf(lbl, sizeof lbl, "Press key\xE2\x80\xA6");
+                else kb_vk_label(vks[c], lbl, sizeof lbl);
+                Rgb bc = cap_c ? C_GOLD : foc_c ? C_CYAN : C_CYAN_MID;
+                float ba = cap_c ? 0.95f : foc_c ? 0.90f : vks[c] ? 0.34f : 0.18f;
+                float fa = cap_c ? 0.24f : foc_c ? 0.34f : vks[c] ? 0.16f : 0.08f;
+                rect((int)bx, (int)by, (int)pw0, (int)bh, cap_c ? C_GOLD : C_SKY2, fa);
+                rect((int)bx, (int)by, (int)pw0, 1, bc, ba);
+                rect((int)bx, (int)(by + bh - 1), (int)pw0, 1, bc, ba);
+                rect((int)bx, (int)by, 1, (int)bh, bc, ba);
+                rect((int)(bx + pw0 - 1), (int)by, 1, (int)bh, bc, ba);
+                float kpx = vpx * 0.92f;
+                float lw = text_w(&g_f_uib, lbl, kpx, 0);
+                if (lw > pw0 - 12 * s && lw > 1) { kpx *= (pw0 - 12 * s) / lw; lw = text_w(&g_f_uib, lbl, kpx, 0); }
+                Rgb kc = cap_c ? C_GOLD : chg_c ? C_GOLD : !vks[c] ? C_DIM : foc_c ? C_WHITE : C_ICE;
+                text(&g_f_uib, bx + (pw0 - lw) * 0.5f, (int)(by + bh * 0.5f + kpx * 0.34f), lbl, kpx, kc, 0);
             }
-            if (row_restart(i)) diamond(vx0 - 14 * s, base - vpx * 0.34f, 4.8f * s, C_GOLD, 0.38f);
+        } else {
+            const char *v = val_name(i);
+            float vw = text_w(&g_f_uib, v, vpx, 0);
+            int page_custom = k_rows[i].apply == A_PAGE && (k_rows[i].slot == 1 ? g_b_on : g_kb_custom);
+            Rgb vc = g_lock_why[i] ? C_DIM : is_danger ? C_ERR : is_cap ? C_GOLD : changed ? C_GOLD : page_custom ? C_GOLD : sel ? C_WHITE : C_ICE;
+            if (is_pill) {
+                /* Action / Subpage row: right-aligned subtle pill look without < > chevrons */
+                float bx = vx1 - vw - 22 * s, bw = vw + 22 * s, bh = rowh * 0.64f, by = y + (rowh - bh) * 0.5f;
+                Rgb bc = is_danger ? C_ERR_DOT : sel ? C_CYAN : C_CYAN_MID;
+                rect((int)bx, (int)by, (int)bw, (int)bh, is_danger ? C_ERR_DOT : C_SKY2, sel ? 0.32f : 0.20f);
+                rect((int)bx, (int)by, (int)bw, 1, bc, sel ? 0.85f : 0.45f);
+                rect((int)bx, (int)(by + bh - 1), (int)bw, 1, bc, sel ? 0.85f : 0.45f);
+                rect((int)bx, (int)by, 1, (int)bh, bc, sel ? 0.85f : 0.45f);
+                rect((int)(bx + bw - 1), (int)by, 1, (int)bh, bc, sel ? 0.85f : 0.45f);
+                text(&g_f_uib, bx + (bw - vw) * 0.5f, base - (int)(rowh * 0.02f), v, vpx, vc, 0);
+            } else {
+                text(&g_f_uib, (vx0 + vx1) * 0.5f - vw * 0.5f, base, v, vpx, vc, 0);
+                if (!g_lock_why[i] && !is_cap) {
+                    float cva = sel ? 1.0f : 0.65f, cpx = vpx * 1.48f;
+                    int cbase = base + (int)(vpx * 0.05f);
+                    Rgb cvc = sel ? C_CYAN : C_CYAN_MID;
+                    text_a(&g_f_ui, vx0, cbase, "\xE2\x80\xB9", cpx, cvc, 0, cva);
+                    text_a(&g_f_ui, vx1 - text_w(&g_f_ui, "\xE2\x80\xBA", cpx, 0), cbase, "\xE2\x80\xBA", cpx, cvc, 0, cva);
+                }
+                if (row_restart(i)) diamond(vx0 - 14 * s, base - vpx * 0.34f, 4.8f * s, C_GOLD, 0.38f);
+            }
         }
         y += (int)rowh;
+    }
+    /* Subtle scrollbar on the right margin when the page scrolls */
+    if (nshow > max_vis) {
+        int sbx = (int)(cx1 + 10 * s), sbw = (int)(3 * s + 0.5f); if (sbw < 2) sbw = 2;
+        int sby = (int)top + 2, sbh = y - sby - 2;
+        if (sbh > 8) {
+            rect(sbx, sby, sbw, sbh, C_CYAN, 0.14f);
+            int th = (int)((float)sbh * max_vis / nshow + 0.5f); if (th < (int)(22 * s)) th = (int)(22 * s);
+            int ty = sby + (int)((float)(sbh - th) * g_scroll / (nshow - max_vis) + 0.5f);
+            rect(sbx, ty, sbw, th, C_CYAN, 0.72f);
+        }
     }
 
     /* ---- State note under the rows (right-aligned) ---- */
     char st_txt[160] = "";
     Rgb sc = C_MUTE; int mark = 0;                         /* 1 gold pending, 2 cyan applied */
-    if (g_cap >= 0) { snprintf(st_txt, sizeof st_txt, "Waiting for controller button"); sc = C_GOLD; mark = 1; }
+    if (g_cap >= 0) {
+        snprintf(st_txt, sizeof st_txt, "%s", k_rows[g_cap].apply == A_KB ? "Waiting for key or mouse button" : "Waiting for controller button");
+        sc = C_GOLD; mark = 1;
+    }
     else if (g_lock_why[g_sel] == 1) { snprintf(st_txt, sizeof st_txt, "Set by environment variable %s", k_rows[g_sel].env); sc = C_MUTE; }
     else if (g_lock_why[g_sel] == 2) { snprintf(st_txt, sizeof st_txt, "Set by profile = low in graphics.ini"); sc = C_MUTE; }
     else if (row_restart(g_sel)) { snprintf(st_txt, sizeof st_txt, "Saved; applies %s", k_rows[g_sel].apply == A_SCALE ? "when this panel closes" : "at the next start"); sc = C_GOLD; mark = 1; }
-    else if ((g_cur[g_sel] != g_start[g_sel] || (k_rows[g_sel].apply == A_PRESET && g_b_on != g_b_start_on)) && k_rows[g_sel].apply != A_QUIT && k_rows[g_sel].apply != A_PAGE) { snprintf(st_txt, sizeof st_txt, "Applied and saved"); sc = C_CYAN; mark = 2; }
+    else if ((g_cur[g_sel] != g_start[g_sel] || (k_rows[g_sel].apply == A_PRESET && g_b_on != g_b_start_on)) && k_rows[g_sel].apply != A_QUIT && k_rows[g_sel].apply != A_PAGE && k_rows[g_sel].apply != A_KB_RESET) { snprintf(st_txt, sizeof st_txt, "Applied and saved"); sc = C_CYAN; mark = 2; }
+    else if (g_page == 2 && nshow > max_vis) { snprintf(st_txt, sizeof st_txt, "Showing %d\xE2\x80\x93%d of %d  \xC2\xB7  Del clears slot", g_scroll + 1, g_scroll + vis_n, nshow); sc = C_MUTE; }
     if (st_txt[0]) {
         float px = (g_page ? 13.5f : 14.5f) * s, w = text_w(&g_f_ui, st_txt, px, 0.3f * s);
         int sb = y + (int)((g_page ? 16 : 22) * s);
@@ -1137,7 +1363,10 @@ static void draw_panel_words(int W, int H, float s) {
     hfade_center((int)edge, (int)band_y, (int)pw, bh, C_BAND_GLOW, 0.24f);
     hfade_center((int)cx0, (int)band_y, (int)cw, 1, C_CYAN, 0.42f);
     hfade_center((int)cx0, (int)band_y + bh - 1, (int)cw, 1, C_CYAN, 0.42f);
-    const char *help = g_cap >= 0 ? "Press the controller button to assign to this action. Press Esc to cancel." : k_rows[g_sel].help;
+    const char *help = g_cap >= 0
+        ? (k_rows[g_cap].apply == A_KB ? "Press any keyboard key or mouse button to assign. Press Esc to cancel."
+                                       : "Press the controller button to assign to this action. Press Esc to cancel.")
+        : k_rows[g_sel].help;
     float hpx = 16.5f * s, hw = text_w(&g_f_ui, help, hpx, 0.3f * s);
     if (hw <= cw * 0.96f) {
         text(&g_f_ui, cx0 + (cw - hw) * 0.5f, (int)(band_y + bh * 0.5f + hpx * 0.35f), help, hpx, C_BAND_TXT, 0.3f * s);
@@ -1159,9 +1388,10 @@ static void draw_panel_words(int W, int H, float s) {
     int fb = (int)(foot_y + fh * 0.56f + 4 * s);
     text(&g_f_ui, cx0, fb, "F1  \xC2\xB7  Start + Select", 14.5f * s, C_MUTE, 0.4f * s);
     float fpx = 16.5f * s;
-    const char *act = k_rows[g_sel].apply == A_QUIT ? "Confirm"
+    const char *act = (k_rows[g_sel].apply == A_QUIT || (k_rows[g_sel].apply == A_KB_RESET && g_kb_reset_ask)) ? "Confirm"
+                    : k_rows[g_sel].apply == A_KB_RESET ? "Reset"
                     : k_rows[g_sel].apply == A_PAGE ? "Open"
-                    : k_rows[g_sel].apply == A_BIND ? "Rebind" : "Change";
+                    : (k_rows[g_sel].apply == A_BIND || k_rows[g_sel].apply == A_KB) ? "Rebind" : "Change";
     const char *close_lbl = g_page ? "Back" : "Close";
     float wc = hint_btn(0, fb, fpx, g_swap ? 1 : 0, act, 0);
     float wb = hint_btn(0, fb, fpx, g_swap ? 0 : 1, close_lbl, 0);
@@ -1481,10 +1711,53 @@ int pcmenu_layer_read(int which, void *dst, int w, int h) {
 
 /* ---------------------------------------------------------------- changes */
 static void add_work(LONG bit) { LONG o; do o = g_work; while (InterlockedCompareExchange(&g_work, o | bit, o) != o); }
+/* Assign or clear (vk == 0) one Primary (col 0) or Secondary (col 1) keyboard/mouse binding.
+ * Swaps on conflict so secondary menu keys (Enter / Backspace / Arrows) stay preserved when primary combat keys move. */
+static void kb_assign(int slot, int col, int vk) {
+    if (slot < 0 || slot >= 25 || (col != 0 && col != 1)) return;
+    vk &= 0xff;
+    int cur = g_kb[slot], p = cur & 0xff, s = (cur >> 8) & 0xff;
+    if (!vk) {
+        int next = col == 0 ? s : p;
+        if (next == cur) return;
+        if (!nnpad_kb_set(slot, next)) return;
+        kb_sync(0);
+        printf("pcmenu: kb[%d] cleared slot %d -> 0x%04x (applied)\n", slot, col, next);
+        return;
+    }
+    if ((col == 0 && p == vk) || (col == 1 && s == vk)) return;
+    /* Self-swap primary <-> secondary if choosing the key already in this row's other slot */
+    if ((col == 0 && s == vk) || (col == 1 && p == vk)) {
+        int next = col == 0 ? (vk | (p << 8)) : (s ? (s | (vk << 8)) : vk);
+        if (!nnpad_kb_set(slot, next)) return;
+        kb_sync(0);
+        printf("pcmenu: kb[%d] swapped primary/secondary -> 0x%04x (applied)\n", slot, next);
+        return;
+    }
+    int old_vk = col == 0 ? p : s;
+    /* Swap with any other action holding vk (preserving that action's other slot, e.g. menu Enter/Backspace) */
+    for (int j = 0; j < 25; j++) {
+        if (j == slot) continue;
+        int op = g_kb[j] & 0xff, os = (g_kb[j] >> 8) & 0xff;
+        if (op == vk) {
+            int rep = (old_vk && old_vk != os) ? old_vk : 0;
+            int onext = rep ? (rep | (os << 8)) : os;
+            nnpad_kb_set(j, onext);
+        } else if (os == vk) {
+            int rep = (old_vk && old_vk != op) ? old_vk : 0;
+            int onext = op ? (op | (rep << 8)) : rep;
+            nnpad_kb_set(j, onext);
+        }
+    }
+    int next = col == 0 ? (vk | (s << 8)) : (p ? (p | (vk << 8)) : vk);
+    if (!nnpad_kb_set(slot, next)) return;
+    kb_sync(0);
+    { char lb[24]; printf("pcmenu: kb[%d] slot %d = %s (applied)\n", slot, col, kb_vk_label(vk, lb, sizeof lb)); }
+}
 static void set_value(int i, int k) {                    /* value k of row i: written, and applied where it can be */
     const Row *r = &k_rows[i];
     if (g_lock_why[i] || k < 0 || k >= row_count(i)) return;
-    if (r->apply == A_PAGE) return;
+    if (r->apply == A_PAGE || r->apply == A_KB || r->apply == A_KB_RESET) return;
     if (r->apply == A_BIND) {
         if (k == g_cur[i] && g_b_on) return;
         uint8_t next[16];
@@ -1520,6 +1793,9 @@ static void set_value(int i, int k) {                    /* value k of row i: wr
     else if (r->apply == A_PROMPTS) { ok = nnpad_prompts_set(r->val[k]); g_fam = nnpad_button_prompts(); g_letter = nnpad_prompts_by_letter(); }      /* the hints and the bind names follow */
     else if (r->apply == A_MENU_SWAP) ok = nnpad_menu_swap_set(r->val[k]);
     else if (r->apply == A_LAYOUT) { ok = nnpad_layout_set(r->val[k]); g_letter = nnpad_prompts_by_letter(); }
+    else if (r->apply == A_MOUSE_CAM) { ok = nnpad_mouse_cam_set(r->val[k]); if (ok) g_kb_custom = !nnpad_kb_is_default(); }
+    else if (r->apply == A_MOUSE_SENS) { ok = nnpad_mouse_sens_set(r->val[k]); if (ok) g_kb_custom = !nnpad_kb_is_default(); }
+    else if (r->apply == A_MOUSE_INV) { ok = nnpad_mouse_inv_set(r->val[k]); if (ok) g_kb_custom = !nnpad_kb_is_default(); }
     else ok = gfx_option_set(r->key, r->val[k]);
     if (!ok) return;
     g_cur[i] = k;
@@ -1556,8 +1832,15 @@ static void change(int i, int dir, int wrap) {             /* wrap 0 (left / rig
     set_value(i, g_cur[i] < 0 ? nearest(i, dir, wrap) : wrap ? (g_cur[i] + dir + n) % n : g_cur[i] + dir);
 }
 static int activate(int i, int dir) {                      /* A or a click on a row; 1 = it took the press and the row's value is not what changes */
-    if (k_rows[i].apply == A_PAGE) { page_go(1, 0); return 1; }
+    if (k_rows[i].apply == A_PAGE) { page_go(k_rows[i].slot, 0); return 1; }
     if (k_rows[i].apply == A_BIND) { g_cap = i; g_cap_t = GetTickCount64(); g_cap_armed = 0; return 1; }
+    if (k_rows[i].apply == A_KB) { g_cap = i; g_cap_col = g_kb_col; g_cap_t = GetTickCount64(); g_cap_armed = 0; g_kb_reset_ask = 0; return 1; }
+    if (k_rows[i].apply == A_KB_RESET) {
+        if (!g_kb_reset_ask) { g_kb_reset_ask = 1; return 1; }
+        g_kb_reset_ask = 0;
+        if (nnpad_kb_reset()) { kb_sync(0); printf("pcmenu: keyboard & mouse reset to defaults (applied)\n"); }
+        return 1;
+    }
     if (k_rows[i].apply == A_QUIT) {
         if (!g_quit_ask) { g_quit_ask = 1; return 1; }
         printf("pcmenu: Quit to desktop chosen\n");
@@ -1565,6 +1848,7 @@ static int activate(int i, int dir) {                      /* A or a click on a 
         return 1;
     }
     g_quit_ask = 0;
+    g_kb_reset_ask = 0;
     change(i, dir, 1);
     return 0;
 }
@@ -1585,10 +1869,11 @@ static void mouse_at(int *x, int *y, int *down) {          /* window pixels; -1 
 }
 static DWORD WINAPI menu_thread(LPVOID arg) {
     (void)arg;
-    int prev_dir = 0, prev_ok = 1, prev_back = 1, prev_click = 1, rep_at = 0, mx0 = -2, my0 = -2;
+    int prev_dir = 0, prev_ok = 1, prev_back = 1, prev_click = 1, prev_del = 1, rep_at = 0, mx0 = -2, my0 = -2;
     ULONGLONG t_dir = 0;
     float sens; int inv;
     display_mouse_want(0);                                 /* the cursor back for the menu (the mouse camera lets it go) */
+    display_mouse_wheel_take();
     while (g_open && !g_display_close) {
         uint64_t b; int lx, ly, mx, my, md;
         nnhid_menu_read(&b, &lx, &ly, g_swap);
@@ -1598,6 +1883,8 @@ static DWORD WINAPI menu_thread(LPVOID arg) {
         int ok = (b & BA) || nnhid_menu_key(VK_RETURN) || nnhid_menu_key(VK_SPACE);
         int close_now = nnhid_menu_key(VK_F1) || (b & (BPLUS | BMINUS)) == (BPLUS | BMINUS);
         int back = (b & BB) || nnhid_menu_key(VK_ESCAPE) || nnhid_menu_key(VK_BACK) || close_now;
+        int del = nnhid_menu_key(0x2E);                    /* VK_DELETE: clears a keyboard/mouse binding slot */
+        int wheel = display_mouse_wheel_take();
         int dir = up ? 1 : down ? 2 : left ? 3 : right ? 4 : 0;
         ULONGLONG now = GetTickCount64();
         int step = dir && (dir != prev_dir || (rep_at && now >= t_dir + (ULONGLONG)rep_at));
@@ -1605,18 +1892,28 @@ static DWORD WINAPI menu_thread(LPVOID arg) {
         prev_dir = dir;
         mouse_at(&mx, &my, &md);
         AcquireSRWLockExclusive(&g_lock);
-        if (g_cap >= 0) {                                  /* waiting for a controller button; what is held now must release first */
-            uint32_t p = nnhid_menu_pad();
+        if (g_cap >= 0) {                                  /* waiting for a pad button or keyboard/mouse key; release first */
             int esc = nnhid_menu_key(VK_ESCAPE) || close_now;
-            g_cap_armed |= !p;
-            if (esc || now - g_cap_t > 8000 || (g_cap_armed && p)) {
-                if (!esc && p) {
-                    int k = 0;
-                    while (k < 15 && !(p >> k & 1)) k++;
-                    set_value(g_cap, k);
+            if (k_rows[g_cap].apply == A_KB) {
+                int vk = nnhid_menu_any_vk();
+                g_cap_armed |= (!vk && !esc);
+                if (esc || now - g_cap_t > 8000 || (g_cap_armed && vk)) {
+                    if (!esc && vk) kb_assign(k_rows[g_cap].slot, g_cap_col, vk);
+                    g_cap = -1; g_cap_cool = 1; g_ver++;
+                    prev_ok = 1; prev_back = 1; prev_dir = 0; prev_del = 1;
                 }
-                g_cap = -1; g_ver++;
-                prev_ok = 1; prev_back = 1; prev_dir = 0;
+            } else {
+                uint32_t p = nnhid_menu_pad();
+                g_cap_armed |= !p;
+                if (esc || now - g_cap_t > 8000 || (g_cap_armed && p)) {
+                    if (!esc && p) {
+                        int k = 0;
+                        while (k < 15 && !(p >> k & 1)) k++;
+                        set_value(g_cap, k);
+                    }
+                    g_cap = -1; g_cap_cool = 1; g_ver++;
+                    prev_ok = 1; prev_back = 1; prev_dir = 0; prev_del = 1;
+                }
             }
             ReleaseSRWLockExclusive(&g_lock);
             prev_click = md;
@@ -1624,17 +1921,67 @@ static DWORD WINAPI menu_thread(LPVOID arg) {
             Sleep(16);
             continue;
         }
-        int was_sel = g_sel, was_cur[NROW], was_page = g_page;
+        if (g_cap_cool) {                                  /* wait until captured key / button / Esc is released before resuming nav */
+            if (!nnhid_menu_any_vk() && !nnhid_menu_key(VK_ESCAPE) && !nnhid_menu_pad() && !md) {
+                g_cap_cool = 0;
+                prev_ok = prev_back = prev_click = prev_del = prev_dir = 0;
+            }
+            ReleaseSRWLockExclusive(&g_lock);
+            if (!InterlockedExchange(&g_job, 1) && !nvn_front_post_pcmenu()) InterlockedExchange(&g_job, 0);
+            Sleep(16);
+            continue;
+        }
+        int was_sel = g_sel, was_cur[NROW], was_page = g_page, was_col = g_kb_col, was_scroll = g_scroll;
         memcpy(was_cur, g_cur, sizeof g_cur);
-        if (step && (dir == 1 || dir == 2)) { do g_sel = (g_sel + (dir == 1 ? NROW - 1 : 1)) % NROW; while (!row_on(g_sel)); }
-        if (step && (dir == 3 || dir == 4)) change(g_sel, dir == 3 ? -1 : 1, 0);
-        if (ok && !prev_ok) { activate(g_sel, 1); g_ver++; }
+        if (step && (dir == 1 || dir == 2)) {
+            g_quit_ask = 0; g_kb_reset_ask = 0;
+            do g_sel = (g_sel + (dir == 1 ? NROW - 1 : 1)) % NROW; while (!row_on(g_sel));
+            if (g_page == 2) scroll_ensure(PCM_KB_VIS);
+        }
+        if (step && (dir == 3 || dir == 4)) {
+            if (k_rows[g_sel].apply == A_KB) g_kb_col = dir == 3 ? 0 : 1;
+            else change(g_sel, dir == 3 ? -1 : 1, 0);
+        }
+        if (wheel && g_page == 2) {
+            int nshow = 0;
+            for (int i = 0; i < NROW; i++) nshow += row_on(i);
+            if (nshow > PCM_KB_VIS) {
+                g_scroll -= wheel * 2;
+                if (g_scroll < 0) g_scroll = 0;
+                if (g_scroll > nshow - PCM_KB_VIS) g_scroll = nshow - PCM_KB_VIS;
+                int idx = 0, first_v = -1, last_v = -1, sel_v = 0;
+                for (int i = 0; i < NROW; i++) {
+                    if (!row_on(i)) continue;
+                    if (idx >= g_scroll && idx < g_scroll + PCM_KB_VIS) {
+                        if (first_v < 0) first_v = i;
+                        last_v = i;
+                        if (i == g_sel) sel_v = 1;
+                    }
+                    idx++;
+                }
+                if (!sel_v) g_sel = wheel > 0 ? first_v : last_v;
+            }
+        }
+        if (del && !prev_del && k_rows[g_sel].apply == A_KB) {
+            kb_assign(k_rows[g_sel].slot, g_kb_col, 0);
+            g_ver++;
+        }
+        int did_ok = 0;
+        if (ok && !prev_ok) { activate(g_sel, 1); did_ok = 1; g_ver++; }
         int px = mx - g_rect[0], py = my - g_rect[1], click = md && !prev_click;
         if (mx >= 0 && (mx != mx0 || my != my0 || click) && px >= 0 && px < g_pw && py >= 0 && py < g_ph && g_cap < 0) {      /* the mouse: hover chooses, a click changes */
             for (int i = 0; i < NROW; i++)                 /* a row's own span: the panel covers the window, its rows step down the diagonal */
                 if (g_row_y[i] >= 0 && py >= g_row_y[i] && py < g_row_y[i] + g_row_h && px >= g_row_x0[i] && px < g_row_x1[i]) {
+                    if (g_sel != i) { g_quit_ask = 0; g_kb_reset_ask = 0; }
                     g_sel = i;
-                    if (click && px >= g_val_x0[i] - g_row_h) {
+                    if (k_rows[i].apply == A_KB) {
+                        if (px >= g_pill_x0[i][0] && px < g_pill_x1[i][0]) g_kb_col = 0;
+                        else if (px >= g_pill_x0[i][1] && px < g_pill_x1[i][1]) g_kb_col = 1;
+                        if (click && ((px >= g_pill_x0[i][0] && px < g_pill_x1[i][0]) || (px >= g_pill_x0[i][1] && px < g_pill_x1[i][1]))) {
+                            activate(i, 1);
+                            g_ver++; break;
+                        }
+                    } else if (click && px >= g_val_x0[i] - g_row_h) {
                         if (k_rows[i].apply == A_BIND) {
                             if (px < g_val_x0[i] + g_row_h) change(i, -1, 1);
                             else if (px > g_val_x1[i] - g_row_h) change(i, 1, 1);
@@ -1648,15 +1995,15 @@ static DWORD WINAPI menu_thread(LPVOID arg) {
             if (click && px >= g_close_r[0] && px < g_close_r[0] + g_close_r[2] && py >= g_close_r[1] && py < g_close_r[1] + g_close_r[3]) back = 1, prev_back = 0;
         }
         mx0 = mx; my0 = my;
-        if (g_sel != was_sel || g_page != was_page || memcmp(was_cur, g_cur, sizeof g_cur)) g_ver++;
-        int do_back = back && !prev_back && !g_close_at;
+        if (g_sel != was_sel || g_page != was_page || g_kb_col != was_col || g_scroll != was_scroll || memcmp(was_cur, g_cur, sizeof g_cur)) g_ver++;
+        int do_back = back && !prev_back && !g_close_at && g_cap < 0 && !did_ok;
         if (do_back) {
-            if (g_page && !close_now) { page_go(0, 1); g_ver++; }
+            if (g_page && !close_now) { page_go(0, g_page); g_ver++; }
             else { g_close_at = now; g_ver++; }            /* the closing plays (PCM_CLOSE_MS); the game goes on after it */
         }
         ReleaseSRWLockExclusive(&g_lock);
         if (g_log && (step || (ok && !prev_ok) || (back && !prev_back) || click)) printf("pcmenu: input: %s%s%s%s -> row %d (%s)\n", step ? (dir == 1 ? "up " : dir == 2 ? "down " : dir == 3 ? "left " : "right ") : "", ok && !prev_ok ? "A " : "", back && !prev_back ? "B " : "", click ? "click " : "", g_sel, k_rows[g_sel].key);
-        prev_ok = ok; prev_click = md;
+        prev_ok = ok; prev_click = md; prev_del = del;
         prev_back = back;
         if (g_close_at && (now - g_close_at >= PCM_CLOSE_MS || !g_gpu)) break;
         if (!InterlockedExchange(&g_job, 1) && !nvn_front_post_pcmenu()) InterlockedExchange(&g_job, 0);

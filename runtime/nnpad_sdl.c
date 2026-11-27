@@ -193,8 +193,8 @@ static const char *const g_default_ini =
 "player = auto\r\n"
 "; Keys: a letter or digit, LEFT UP RIGHT DOWN ENTER BACKSPACE SPACE TAB ESC SHIFT CTRL ALT LSHIFT RSHIFT LCTRL RCTRL LALT RALT F1..F12,\r\n"
 "; NUM0..NUM9, MOUSE1..MOUSE5 (left, right, middle, back, forward), or 0x<virtual key code>; none = unbound. Two keys for one\r\n"
-"; button: separated by a comma (A = MOUSE2, ENTER). Pad and keyboard work at the same time (no switch needed). The Pro buttons\r\n"
-"; and what the first game built on this runtime did with them (change the comments with the keys for yours):\r\n"
+"; button: separated by a comma (A = MOUSE2, ENTER). Pad and keyboard work at the same time (no switch needed), and these keys\r\n"
+"; can also be rebound in-game from PC Settings (F1) -> Keyboard & mouse:\r\n"
 "X = MOUSE1\r\n"
 "; punch\r\n"
 "A = MOUSE2, ENTER\r\n"
@@ -206,20 +206,20 @@ static const char *const g_default_ini =
 "ZR = LSHIFT\r\n"
 "; dodge\r\n"
 "ZL = Q, MOUSE4\r\n"
-"; Demon Slave (hold, with the attack keys)\r\n"
+"; weapon set\r\n"
 "L = R\r\n"
-"; weapon switch\r\n"
+"; Umbran Climax\r\n"
 "R = F\r\n"
-"; stance change\r\n"
+"; lock-on\r\n"
 "STICK_R = MOUSE3, V\r\n"
-"; camera / lock-on\r\n"
+"; reset camera\r\n"
 "STICK_L = C\r\n"
-"; waypoint\r\n"
+"; left stick press\r\n"
 "PLUS = ESC\r\n"
 "; pause (also lets the mouse go)\r\n"
 "MINUS = TAB\r\n"
 "; subscreen\r\n"
-"; D-pad: left / up / right = Demon Select, down = taunt; moves in menus\r\n"
+"; D-pad: items / taunt; moves in menus\r\n"
 "LEFT = LEFT, 1\r\nUP = UP, 2\r\nRIGHT = RIGHT, 3\r\nDOWN = DOWN, T\r\n"
 "; Left stick (moving; the menus too). A diagonal is as long as a straight push; WALK held = 0.4 of the travel (walking).\r\n"
 "LSTICK_LEFT = A\r\nLSTICK_UP = W\r\nLSTICK_RIGHT = D\r\nLSTICK_DOWN = S\r\nWALK = LCTRL\r\n"
@@ -963,10 +963,12 @@ const char *nnpad_prompts_setting(void) {
     lock(); if (!g_cfg.path[0]) cfg_load(1); const char *s = g_prompts_name[g_cfg.prompts]; unlock();
     return s;
 }
-static int cfg_key_set(const char *key, const char *val) {      /* lock held */
+static int cfg_section_key_set(const char *section, const char *key, const char *val) {      /* lock held */
     if (!g_cfg.path[0]) cfg_load(1);
-    size_t len = 0, done = 0, kn = strlen(key);
+    size_t len = 0, done = 0, kn = strlen(key), sn = strlen(section);
     char *b = read_file(g_cfg.path, &len), tmp[MAX_PATH + 8];
+    const char *eol = (b && strstr(b, "\r\n")) ? "\r\n" : "\n";
+    int in_sect = 0;
     snprintf(tmp, sizeof tmp, "%s.tmp", g_cfg.path);
     FILE *f = fopen(tmp, "wb");
     int ok = f != NULL;
@@ -975,18 +977,38 @@ static int cfg_key_set(const char *key, const char *val) {      /* lock held */
         while (e < len && b[e] != '\n') e++;
         if (e < len) e++;
         while (k < e && (b[k] == ' ' || b[k] == '\t')) k++;
-        if (!done && e - k > kn && !_strnicmp(b + k, key, kn) && (b[k + kn] == ' ' || b[k + kn] == '\t' || b[k + kn] == '=')) {
+        if (k < e && b[k] == '[') {
+            if (in_sect && !done) { fprintf(f, "%s = %s%s", key, val, eol); done = 1; }
+            size_t p = k + 1;
+            while (p < e && (b[p] == ' ' || b[p] == '\t')) p++;
+            size_t q = p;
+            while (q < e && b[q] != ']' && b[q] != '\r' && b[q] != '\n') q++;
+            while (q > p && (b[q - 1] == ' ' || b[q - 1] == '\t')) q--;
+            in_sect = (q - p == sn && !_strnicmp(b + p, section, sn));
+            fwrite(b + s, 1, e - s, f);
+        } else if (in_sect && !done && k < e && b[k] != ';' && b[k] != '#' && e - k > kn &&
+                   !_strnicmp(b + k, key, kn) && (b[k + kn] == ' ' || b[k + kn] == '\t' || b[k + kn] == '=')) {
             fprintf(f, "%s = %s%s", key, val, b[e - 1] != '\n' ? "" : e - s > 1 && b[e - 2] == '\r' ? "\r\n" : "\n");
             done = 1;
         } else fwrite(b + s, 1, e - s, f);
         s = e;
     }
+    int need_nl = len > 0 && b && b[len - 1] != '\n';
     free(b);
-    if (f) { if (!done) fprintf(f, "\r\n[general]\r\n%s = %s\r\n", key, val); ok = !fclose(f); }
+    if (f) {
+        if (!done) {
+            if (need_nl) fputs(eol, f);
+            if (in_sect) fprintf(f, "%s = %s%s", key, val, eol);
+            else fprintf(f, "%s[%s]%s%s = %s%s", eol, section, eol, key, val, eol);
+        }
+        ok = !fclose(f);
+    }
     if (ok) ok = MoveFileExA(tmp, g_cfg.path, MOVEFILE_REPLACE_EXISTING) != 0;
+    if (ok) g_cfg.mtime = file_mtime(g_cfg.path);
     if (!ok) DeleteFileA(tmp);
     return ok;
 }
+static int cfg_key_set(const char *key, const char *val) { return cfg_section_key_set("general", key, val); }
 int nnpad_prompts_set(const char *val) {
     lock();
     int ok = cfg_key_set("button_prompts", val);
@@ -1122,6 +1144,104 @@ int nnpad_prompts_by_letter(void) {
 int nnpad_kb_vk(int idx) {
     if (!g_inited) { lock(); if (!g_cfg.path[0]) { cfg_load(1); } unlock(); }
     return idx >= 0 && idx < KB_N ? g_cfg.kb_vk[idx] : 0;
+}
+int nnpad_kb_default_vk(int idx) { return idx >= 0 && idx < KB_N ? g_kb_default[idx] : 0; }
+static void vk_ini_name(int vk, char *out, size_t cap) {
+    vk &= 0xff;
+    if (!vk) { snprintf(out, cap, "none"); return; }
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) { snprintf(out, cap, "%c", vk); return; }
+    switch (vk) {
+    case VK_LBUTTON:  snprintf(out, cap, "MOUSE1"); return;
+    case VK_RBUTTON:  snprintf(out, cap, "MOUSE2"); return;
+    case VK_MBUTTON:  snprintf(out, cap, "MOUSE3"); return;
+    case VK_XBUTTON1: snprintf(out, cap, "MOUSE4"); return;
+    case VK_XBUTTON2: snprintf(out, cap, "MOUSE5"); return;
+    case VK_LEFT:     snprintf(out, cap, "LEFT"); return;
+    case VK_UP:       snprintf(out, cap, "UP"); return;
+    case VK_RIGHT:    snprintf(out, cap, "RIGHT"); return;
+    case VK_DOWN:     snprintf(out, cap, "DOWN"); return;
+    case VK_RETURN:   snprintf(out, cap, "ENTER"); return;
+    case VK_BACK:     snprintf(out, cap, "BACKSPACE"); return;
+    case VK_SPACE:    snprintf(out, cap, "SPACE"); return;
+    case VK_TAB:      snprintf(out, cap, "TAB"); return;
+    case VK_ESCAPE:   snprintf(out, cap, "ESC"); return;
+    case VK_SHIFT:    snprintf(out, cap, "SHIFT"); return;
+    case VK_CONTROL:  snprintf(out, cap, "CTRL"); return;
+    case VK_MENU:     snprintf(out, cap, "ALT"); return;
+    case VK_LSHIFT:   snprintf(out, cap, "LSHIFT"); return;
+    case VK_RSHIFT:   snprintf(out, cap, "RSHIFT"); return;
+    case VK_LCONTROL: snprintf(out, cap, "LCTRL"); return;
+    case VK_RCONTROL: snprintf(out, cap, "RCTRL"); return;
+    case VK_LMENU:    snprintf(out, cap, "LALT"); return;
+    case VK_RMENU:    snprintf(out, cap, "RALT"); return;
+    default:
+        if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD0 + 9) { snprintf(out, cap, "NUM%d", vk - VK_NUMPAD0); return; }
+        if (vk >= VK_F1 && vk <= VK_F1 + 11) { snprintf(out, cap, "F%d", vk - VK_F1 + 1); return; }
+        snprintf(out, cap, "0x%02X", vk);
+        return;
+    }
+}
+static int kb_set_locked(int idx, int vk_packed) {      /* lock held */
+    int k1 = vk_packed & 0xff, k2 = (vk_packed >> 8) & 0xff;
+    if (!k1 && k2) { k1 = k2; k2 = 0; }
+    if (k1 && k1 == k2) k2 = 0;
+    char s1[16], s2[16], val[40];
+    if (!k1) snprintf(val, sizeof val, "none");
+    else if (!k2) { vk_ini_name(k1, s1, sizeof s1); snprintf(val, sizeof val, "%s", s1); }
+    else { vk_ini_name(k1, s1, sizeof s1); vk_ini_name(k2, s2, sizeof s2); snprintf(val, sizeof val, "%s, %s", s1, s2); }
+    int ok = cfg_section_key_set("keyboard", g_kbn[idx], val);
+    if (ok) g_cfg.kb_vk[idx] = k1 | (k2 << 8);
+    return ok;
+}
+int nnpad_kb_set(int idx, int vk_packed) {
+    if (idx < 0 || idx >= KB_N) return 0;
+    lock();
+    int ok = kb_set_locked(idx, vk_packed);
+    unlock();
+    return ok;
+}
+int nnpad_mouse_cam_set(const char *val) {
+    int on = parse_bool(val);
+    lock();
+    int ok = cfg_section_key_set("keyboard", "mouse_camera", on ? "on" : "off");
+    if (ok) g_cfg.mouse_cam = on;
+    unlock();
+    return ok;
+}
+int nnpad_mouse_sens_set(const char *val) {
+    float v = (float)atof(val);
+    if (!(v > 0.01f && v <= 20.0f)) return 0;
+    lock();
+    int ok = cfg_section_key_set("keyboard", "mouse_sensitivity", val);
+    if (ok) g_cfg.mouse_sens = v;
+    unlock();
+    return ok;
+}
+int nnpad_mouse_inv_set(const char *val) {
+    int on = parse_bool(val);
+    lock();
+    int ok = cfg_section_key_set("keyboard", "mouse_invert_y", on ? "on" : "off");
+    if (ok) g_cfg.mouse_inv = on;
+    unlock();
+    return ok;
+}
+int nnpad_kb_is_default(void) {
+    lock();
+    if (!g_cfg.path[0]) cfg_load(1);
+    int def = g_cfg.mouse_cam == 1 && !g_cfg.mouse_inv && fabsf(g_cfg.mouse_sens - 1.0f) < 0.01f;
+    for (int i = 0; def && i < KB_N; i++) if (g_cfg.kb_vk[i] != g_kb_default[i]) def = 0;
+    unlock();
+    return def;
+}
+int nnpad_kb_reset(void) {
+    lock();
+    int ok = 1;
+    for (int i = 0; i < KB_N && ok; i++) ok = kb_set_locked(i, g_kb_default[i]);
+    if (ok) { ok = cfg_section_key_set("keyboard", "mouse_camera", "on"); if (ok) g_cfg.mouse_cam = 1; }
+    if (ok) { ok = cfg_section_key_set("keyboard", "mouse_sensitivity", "1.0"); if (ok) g_cfg.mouse_sens = 1.0f; }
+    if (ok) { ok = cfg_section_key_set("keyboard", "mouse_invert_y", "off"); if (ok) g_cfg.mouse_inv = 0; }
+    unlock();
+    return ok;
 }
 int nnpad_key_vk(const char *name) { return parse_vk1(name); }
 
@@ -1568,6 +1688,14 @@ int nnpad_selftest(const NnHidHooks *h) {
             int bok = !nnpad_bind_get(got) && nnpad_bind_set(b) && nnpad_bind_get(got) && !memcmp(b, got, 16);
             bok = bok && nnpad_bind_set(NULL) && !nnpad_bind_get(got);
             check(bok, "bind_controls saved to controllers.ini and reset back to game");
+        }
+        {
+            int kok = nnpad_kb_set(0, KB2('K', VK_RETURN)) && nnpad_kb_vk(0) == KB2('K', VK_RETURN);
+            kok = kok && nnpad_mouse_sens_set("1.5") && nnpad_mouse_inv_set("on") && nnpad_mouse_cam_set("off");
+            float s = 0; int inv = 0; int cam = nnpad_mouse_cfg(&s, &inv);
+            kok = kok && !cam && fabsf(s - 1.5f) < 0.01f && inv == 1 && !nnpad_kb_is_default();
+            kok = kok && nnpad_kb_reset() && nnpad_kb_is_default() && nnpad_kb_vk(0) == g_kb_default[0];
+            check(kok, "[keyboard] bindings and mouse settings saved to controllers.ini and reset to defaults");
         }
         SDL_SetJoystickVirtualAxis(js[0], SDL_GAMEPAD_AXIS_LEFTY, 0);
         h->vibrate(0, 1.0f, 1.0f);

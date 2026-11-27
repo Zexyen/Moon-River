@@ -720,6 +720,27 @@ void nnhid_menu_read(uint64_t *buttons, int *lx, int *ly, int swap_ab) {      /*
     *buttons = b; *lx = x; *ly = y;
 }
 int nnhid_menu_key(int vk) { return key(vk); }
+int nnhid_menu_any_vk(void) {                                  /* [moonriver] first pressed bindable keyboard key or mouse button (excluding F1 / Esc) */
+    if (!g_kb_test_on && !keyboard_ours()) return 0;
+    static const int list[] = {
+        VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2,
+        'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z',
+        '0','1','2','3','4','5','6','7','8','9',
+        VK_LSHIFT, VK_RSHIFT, VK_LCONTROL, VK_RCONTROL, VK_LMENU, VK_RMENU,
+        VK_SPACE, VK_TAB, VK_RETURN, VK_BACK,
+        VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN,
+        0x21, 0x22, 0x23, 0x24, 0x2D, 0x2E,                   /* PgUp, PgDn, End, Home, Ins, Del */
+        0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, /* NUM0..NUM9 */
+        0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, /* F2..F12 (F1 reserved for PC Settings) */
+        0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE
+    };
+    for (size_t i = 0; i < sizeof list / sizeof list[0]; i++) {
+        int vk = list[i];
+        int down = g_kb_test_on ? g_kb_test[vk & 0xff] : ((GetAsyncKeyState(vk) & 0x8000) != 0);
+        if (down) return vk;
+    }
+    return 0;
+}
 static void hid_GetNpadState_FullKey(Ctx *c) { fill_pad(A0, rd32(A1), 1); pad_gate(A0, rd32(A1)); }
 static void hid_GetNpadState_Other(Ctx *c) { fill_pad(A0, rd32(A1), 0); }
 static void hid_GetPlayerLedPattern(Ctx *c) {               /* the console's patterns for players 1..8 */
